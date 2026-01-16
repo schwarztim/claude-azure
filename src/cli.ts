@@ -11,6 +11,8 @@ import { program } from 'commander';
 import { getConfig, configExists, clearConfig } from './config.js';
 import { runWizard } from './wizard.js';
 import { startProxy } from './proxy.js';
+import { checkForUpdates, doUpdate } from './updater.js';
+import { setupMcps, isMcpInstalled } from './mcp-setup.js';
 
 // Find a free port
 function findFreePort(): Promise<number> {
@@ -24,9 +26,8 @@ function findFreePort(): Promise<number> {
   });
 }
 
-// Find claude binary using which command safely
+// Find claude binary
 function findClaude(): string | null {
-  // Common paths to check
   const commonPaths = [
     '/usr/local/bin/claude',
     '/opt/homebrew/bin/claude',
@@ -34,23 +35,18 @@ function findClaude(): string | null {
     `${process.env.HOME}/.claude/bin/claude`,
   ];
 
-  // Check common paths first
   for (const path of commonPaths) {
-    if (existsSync(path)) {
-      return path;
-    }
+    if (existsSync(path)) return path;
   }
 
-  // Try using which command
   try {
-    const result = execFileSync('which', ['claude'], { encoding: 'utf-8' }).trim();
-    return result || null;
+    return execFileSync('which', ['claude'], { encoding: 'utf-8' }).trim() || null;
   } catch {
     return null;
   }
 }
 
-// Wait for proxy to be ready
+// Wait for proxy
 async function waitForProxy(port: number, timeout = 10000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeout) {
@@ -69,16 +65,26 @@ async function main() {
   program
     .name('claude-azure')
     .description('Claude Code with native Azure OpenAI support')
-    .version('1.0.0')
+    .version('1.1.0')
     .option('--setup', 'Run the setup wizard')
     .option('--reconfigure', 'Reconfigure settings')
     .option('--verbose', 'Show proxy logs')
     .option('--reset', 'Clear all configuration')
+    .option('--update', 'Update from GitHub')
     .allowUnknownOption(true)
     .parse();
 
   const options = program.opts();
   const claudeArgs = program.args;
+
+  // Handle update
+  if (options.update) {
+    await doUpdate();
+    // Also update MCPs
+    console.log('\nUpdating MCPs...');
+    await setupMcps(true, true);
+    process.exit(0);
+  }
 
   // Handle reset
   if (options.reset) {
@@ -90,9 +96,19 @@ async function main() {
   // Handle setup/reconfigure
   if (options.setup || options.reconfigure) {
     await runWizard();
+    // Install MCPs on setup
+    console.log('\nSetting up web search capability...');
+    await setupMcps(true);
     if (claudeArgs.length === 0) {
       process.exit(0);
     }
+  }
+
+  // Check for updates (quick, cached)
+  const updateMsg = await checkForUpdates();
+  if (updateMsg) {
+    console.log(updateMsg);
+    console.log();
   }
 
   // Check for configuration
@@ -102,6 +118,10 @@ async function main() {
     console.log(chalk.gray('  Use Claude Code with Azure OpenAI, OpenAI, or Anthropic'));
     console.log();
     await runWizard();
+
+    // Install MCPs on first run
+    console.log('\nSetting up web search capability...');
+    await setupMcps(true);
   }
 
   const config = getConfig();
@@ -115,6 +135,12 @@ async function main() {
   if (!claudeBinary) {
     console.error(chalk.red('Error:') + ' Claude Code not found. Install from https://claude.ai/code');
     process.exit(1);
+  }
+
+  // Ensure MCPs installed (silent check)
+  if (!isMcpInstalled()) {
+    console.log('Installing web search MCP...');
+    await setupMcps(false);
   }
 
   // Direct passthrough for Anthropic
@@ -148,7 +174,6 @@ async function main() {
       verbose: !!options.verbose,
     });
   } else if (config.provider === 'openai' && config.openai) {
-    // TODO: Add OpenAI proxy support
     spinner.fail('OpenAI proxy not yet implemented');
     process.exit(1);
   }
@@ -168,21 +193,14 @@ async function main() {
     ...process.env,
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
   };
-  delete env.ANTHROPIC_API_KEY; // Remove any existing key
+  delete env.ANTHROPIC_API_KEY;
 
   const child = spawn(claudeBinary, claudeArgs, { env, stdio: 'inherit' });
 
-  // Handle signals
-  process.on('SIGINT', () => {
-    child.kill('SIGINT');
-  });
-  process.on('SIGTERM', () => {
-    child.kill('SIGTERM');
-  });
+  process.on('SIGINT', () => child.kill('SIGINT'));
+  process.on('SIGTERM', () => child.kill('SIGTERM'));
 
-  child.on('exit', (code) => {
-    process.exit(code || 0);
-  });
+  child.on('exit', (code) => process.exit(code || 0));
 }
 
 main().catch((err) => {
