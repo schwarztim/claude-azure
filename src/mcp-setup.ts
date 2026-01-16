@@ -8,7 +8,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 
 const MCP_DIR = join(homedir(), '.claude-azure', 'mcps');
-const MCP_CONFIG = join(homedir(), '.claude', 'mcp.json');
+const MCP_CONFIG = join(homedir(), '.claude', 'user-mcps.json');
 const WEB_SEARCH_REPO = 'https://github.com/schwarztim/web-search-mcp.git';
 
 export function isMcpInstalled(): boolean {
@@ -19,7 +19,8 @@ export function isMcpRegistered(): boolean {
   try {
     if (!existsSync(MCP_CONFIG)) return false;
     const config = JSON.parse(readFileSync(MCP_CONFIG, 'utf-8'));
-    return 'web-search' in config;
+    // user-mcps.json uses mcpServers wrapper
+    return 'web-search' in (config.mcpServers || {});
   } catch {
     return false;
   }
@@ -75,14 +76,15 @@ export function registerWebSearchMcp(verbose = false): boolean {
     // Ensure .claude directory exists
     mkdirSync(join(homedir(), '.claude'), { recursive: true });
 
-    // Load or create config (FLAT format - no mcpServers wrapper)
-    let config: Record<string, any> = {};
+    // Load or create config (user-mcps.json uses mcpServers wrapper)
+    let config: Record<string, any> = { mcpServers: {} };
     if (existsSync(MCP_CONFIG)) {
       config = JSON.parse(readFileSync(MCP_CONFIG, 'utf-8'));
+      if (!config.mcpServers) config.mcpServers = {};
     }
 
     // Add web-search
-    config['web-search'] = {
+    config.mcpServers['web-search'] = {
       command: 'node',
       args: [indexPath],
     };
