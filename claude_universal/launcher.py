@@ -51,7 +51,7 @@ def check_for_updates() -> Optional[str]:
 
             # If version doesn't contain the latest SHA, update available
             if latest_sha not in current_version:
-                message = "\033[38;5;11m● Update available! Run: claude-azure --update\033[0m"
+                message = "\033[38;5;11m● Update available! Run: cd ~/Scripts/claude-azure && git pull\033[0m"
 
             # Cache result
             get_config_dir().mkdir(parents=True, exist_ok=True)
