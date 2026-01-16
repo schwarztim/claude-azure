@@ -265,7 +265,7 @@ def main(args: Optional[list[str]] = None) -> int:
         return result.returncode
 
     if "--help" in args and len(args) == 1:
-        print("Claude Universal - Use Claude Code with any AI backend")
+        print("Claude Azure - Use Claude Code with Azure OpenAI")
         print()
         print("Usage: claude-azure [options] [claude-args...]")
         print()
@@ -294,8 +294,8 @@ def main(args: Optional[list[str]] = None) -> int:
 
     # Check for configuration
     if not config_exists():
-        print("Welcome to Claude Universal!")
-        print("Let's set up your AI backend.\n")
+        print("Welcome to Claude Azure!")
+        print("Let's set up your Azure OpenAI backend.\n")
         from .wizard import run_wizard
         if not run_wizard():
             return 1
@@ -335,7 +335,7 @@ def main(args: Optional[list[str]] = None) -> int:
     port = find_free_port()
 
     # Show compact Q logo
-    print("\033[38;5;39m ◖Q◗\033[0m \033[38;5;250mClaude Universal\033[0m")
+    print("\033[38;5;39m ◖Q◗\033[0m \033[38;5;250mClaude Azure\033[0m")
 
     # Start proxy
     print(f"Starting proxy on port {port}...")

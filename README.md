@@ -1,62 +1,169 @@
-# ⚠️ This Repository Has Moved
+# Claude Azure
 
 <div align="center">
 
-```
-╔══════════════════════════════════════════════════════════════════╗
-║                                                                  ║
-║   ┌─────────────────────────────────────────────────────────┐   ║
-║   │                                                         │   ║
-║   │   🚀  This project has been renamed and relocated!  🚀  │   ║
-║   │                                                         │   ║
-║   └─────────────────────────────────────────────────────────┘   ║
-║                                                                  ║
-╚══════════════════════════════════════════════════════════════════╝
-```
+**Use Claude Code with Azure OpenAI - no Anthropic subscription required**
 
-<br>
-
-# 📦 **New Repository**
-
-## **[claude-azure](https://github.com/schwarztim/claude-azure)**
-
-<br>
-
-[![New Repo](https://img.shields.io/badge/Go%20to-claude--azure-blue?style=for-the-badge&logo=github)](https://github.com/schwarztim/claude-azure)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 </div>
 
 ---
 
-## Why the move?
+## What This Does
 
-The project was refocused to specifically serve **Azure OpenAI** users who want to use Claude Code without an Anthropic subscription. The new name better reflects its primary purpose.
+Claude Azure is a launcher that lets you use [Claude Code](https://github.com/anthropics/claude-code) (Anthropic's CLI coding assistant) with **Azure OpenAI** or other OpenAI-compatible backends.
 
-## Migration
+### How It Works
 
-### If you installed via pipx:
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        claude-azure                           │
+│                                                              │
+│  1. Starts a local proxy server on a random port            │
+│  2. Sets ANTHROPIC_BASE_URL to point to the proxy           │
+│  3. Launches Claude Code (official CLI)                      │
+└──────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────┐
+│                     Embedded Proxy                            │
+│                                                              │
+│  • Receives Claude API requests from Claude Code             │
+│  • Translates them to OpenAI-compatible format               │
+│  • Forwards to your Azure OpenAI endpoint                    │
+│  • Translates responses back to Claude format                │
+└──────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Your AI Backend                            │
+│                                                              │
+│  Azure OpenAI  │  OpenAI  │  Ollama  │  Custom API           │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Installation
+
+### Prerequisites
+
+- Python 3.10+
+- [Claude Code](https://github.com/anthropics/claude-code) installed (`npm install -g @anthropic-ai/claude-code`)
+
+### Install via pipx (recommended)
+
 ```bash
-pipx uninstall claude-universal
 pipx install git+https://github.com/schwarztim/claude-azure.git
 ```
 
-### If you installed via pip:
+### Install via pip
+
 ```bash
-pip uninstall claude-universal
 pip install git+https://github.com/schwarztim/claude-azure.git
 ```
 
-### Your configuration is preserved!
-Configuration files in `~/.claude-universal/` will continue to work.
+## Quick Start
 
----
+```bash
+# First run - triggers setup wizard
+claude-azure
 
-<div align="center">
+# You'll be prompted for:
+# - Azure endpoint (e.g., https://your-resource.openai.azure.com)
+# - API key
+# - Deployment name (e.g., gpt-4o, gpt-5.2)
+```
 
-### ⭐ Star the new repo: **[schwarztim/claude-azure](https://github.com/schwarztim/claude-azure)**
+## Usage
 
-<br>
+```bash
+# Run with your Azure backend
+claude-azure
 
-*This repository is now archived and will receive no further updates.*
+# Show proxy logs (diagnose issues)
+claude-azure --verbose
 
-</div>
+# Reconfigure settings
+claude-azure --setup
+
+# Update to latest version
+claude-azure --update
+
+# Show version
+claude-azure --version
+
+# Pass arguments to Claude Code
+claude-azure -c  # continue last conversation
+```
+
+## Configuration
+
+Config is stored in `~/.claude-azure/config.json`:
+
+```json
+{
+  "provider": "azure",
+  "azure": {
+    "api_key": "your-api-key",
+    "endpoint": "https://your-resource.openai.azure.com/"
+  },
+  "models": {
+    "opus": "gpt-5.2",
+    "sonnet": "gpt-5.2",
+    "haiku": "gpt-5.2"
+  }
+}
+```
+
+### Model Mapping
+
+Claude Code uses three model tiers. You map them to your Azure deployments:
+
+| Claude Code Tier | Description | Example Mapping |
+|------------------|-------------|-----------------|
+| Opus | Most capable | gpt-4-turbo, gpt-5.2 |
+| Sonnet | Balanced (default) | gpt-4o, gpt-5.2 |
+| Haiku | Fast | gpt-4o-mini |
+
+## Supported Providers
+
+| Provider | Description |
+|----------|-------------|
+| **Azure OpenAI** | Azure-hosted OpenAI models (GPT-4, GPT-5, etc.) |
+| **OpenAI** | OpenAI API directly |
+| **Anthropic** | Passthrough mode (requires Anthropic subscription) |
+| **Ollama** | Local models via Ollama |
+| **Custom** | Any OpenAI-compatible API |
+
+## Troubleshooting
+
+### Verify requests go to Azure
+
+Run with `--verbose` to see proxy logs:
+
+```bash
+claude-azure --verbose
+```
+
+You'll see lines like:
+
+```
+[PROXY] claude-sonnet-4-20250514 -> gpt-5.2 @ https://your-azure.openai.azure.com/openai/v1/chat/completions
+```
+
+### "claude command not found"
+
+Install Claude Code first:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+### Connection errors
+
+Run `claude-azure --setup` to reconfigure your backend settings.
+
+## License
+
+MIT

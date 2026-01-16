@@ -1,4 +1,4 @@
-"""Interactive setup wizard for Claude Universal."""
+"""Interactive setup wizard for Claude Azure."""
 
 import getpass
 import sys
@@ -362,8 +362,8 @@ def test_connection(config: Config) -> bool:
 def run_wizard(force: bool = False) -> bool:
     """Run the setup wizard."""
     console.print(Panel.fit(
-        "[bold]Claude Universal Setup Wizard[/bold]\n"
-        "Configure your AI backend for Claude Code",
+        "[bold]Claude Azure Setup Wizard[/bold]\n"
+        "Configure your Azure OpenAI backend for Claude Code",
         border_style="blue"
     ))
 
