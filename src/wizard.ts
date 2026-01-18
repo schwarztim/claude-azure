@@ -80,38 +80,78 @@ async function setupAzure(): Promise<AppConfig> {
     },
   ]);
 
-  // Model deployment names
+  // Choose deployment mode
   console.log();
-  console.log(chalk.blue('Model Deployments'));
-  console.log(chalk.gray('Enter the deployment names for each model tier'));
+  console.log(chalk.blue('Deployment Mode'));
+  console.log(chalk.gray('Choose how you want to configure model deployments'));
   console.log();
 
-  const models = await inquirer.prompt([
+  const { mode } = await inquirer.prompt([
     {
-      type: 'input',
-      name: 'opus',
-      message: 'Opus/Large model deployment:',
-      default: 'gpt-4o',
-    },
-    {
-      type: 'input',
-      name: 'sonnet',
-      message: 'Sonnet/Medium model deployment:',
-      default: 'gpt-4o',
-    },
-    {
-      type: 'input',
-      name: 'haiku',
-      message: 'Haiku/Small model deployment:',
-      default: 'gpt-4o-mini',
+      type: 'list',
+      name: 'mode',
+      message: 'Select deployment mode:',
+      choices: [
+        {
+          name: chalk.gray('Tiered') + ' - Separate deployments for different model sizes',
+          value: 'tiered',
+        },
+        {
+          name: chalk.gray('Model Router') + ' - Single deployment for all models',
+          value: 'router',
+        },
+      ],
     },
   ]);
 
+  let deploymentConfig: { router?: string; deployments?: { opus: string; sonnet: string; haiku: string } };
+
+  if (mode === 'router') {
+    const router = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'deployment',
+        message: 'Model Router deployment name:',
+        validate: (input: string) => input.length > 0 || 'Deployment name is required',
+      },
+    ]);
+    deploymentConfig = { router: router.deployment };
+  } else {
+    const models = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'opus',
+        message: 'Opus/Large model deployment:',
+        default: 'gpt-4o',
+      },
+      {
+        type: 'input',
+        name: 'sonnet',
+        message: 'Sonnet/Medium model deployment:',
+        default: 'gpt-4o',
+      },
+      {
+        type: 'input',
+        name: 'haiku',
+        message: 'Haiku/Small model deployment:',
+        default: 'gpt-4o-mini',
+      },
+    ]);
+    deploymentConfig = {
+      deployments: {
+        opus: models.opus,
+        sonnet: models.sonnet,
+        haiku: models.haiku,
+      },
+    };
+  }
+
   // Test connection
   const spinner = ora('Testing Azure connection...').start();
+  const testDeployment = deploymentConfig.router || deploymentConfig.deployments?.sonnet;
 
   try {
-    const testUrl = `${answers.endpoint}/openai/deployments/${models.sonnet}/chat/completions?api-version=${answers.apiVersion}`;
+    const testUrl = `${answers.endpoint}/openai/deployments/${testDeployment}/chat/completions?api-version=${answers.apiVersion}`;
     await axios.post(
       testUrl,
       {
@@ -142,11 +182,8 @@ async function setupAzure(): Promise<AppConfig> {
     endpoint: answers.endpoint,
     apiKey: answers.apiKey,
     apiVersion: answers.apiVersion,
-    deployments: {
-      opus: models.opus,
-      sonnet: models.sonnet,
-      haiku: models.haiku,
-    },
+    deployments: deploymentConfig.deployments || { opus: '', sonnet: '', haiku: '' },
+    router: deploymentConfig.router,
   };
 
   return { provider: 'azure', azure };

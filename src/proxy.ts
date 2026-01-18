@@ -19,12 +19,29 @@ function sseEvent(event: string, data: any): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-// Model mapping: Anthropic -> Azure deployment
-function mapModel(model: string, config: AzureConfig): string {
+// Get deployment name for URL (Azure deployment endpoint)
+function getDeployment(model: string, config: AzureConfig): string {
+  // If router deployment is configured, use it for all models
+  if (config.router) {
+    return config.router;
+  }
+
+  // Otherwise, use tiered deployments
   const lower = model.toLowerCase();
-  if (lower.includes('opus')) return config.deployments.opus;
-  if (lower.includes('haiku')) return config.deployments.haiku;
-  return config.deployments.sonnet;
+  if (lower.includes('opus')) return config.deployments.opus || 'gpt-4o';
+  if (lower.includes('haiku')) return config.deployments.haiku || 'gpt-4o-mini';
+  return config.deployments.sonnet || 'gpt-4o';
+}
+
+// Get model name for request body (what the router should select)
+function getModelName(model: string, config: AzureConfig): string {
+  // If using router, pass through the original model name so router can select dynamically
+  if (config.router) {
+    return model;
+  }
+
+  // Otherwise, use the deployment name (tiered mode)
+  return getDeployment(model, config);
 }
 
 // Convert Claude messages to OpenAI format (handles tool_use, tool_result, images)
@@ -158,7 +175,7 @@ function convertTools(claudeTools: any[]): any[] {
 // Build OpenAI request from Claude request
 function buildOpenAIRequest(claudeReq: any, config: AzureConfig): any {
   const req: any = {
-    model: mapModel(claudeReq.model || '', config),
+    model: getModelName(claudeReq.model || '', config),
     messages: convertMessages(claudeReq.messages || [], claudeReq.system),
     stream: claudeReq.stream || false,
   };
@@ -275,13 +292,14 @@ export function createProxy(config: ProxyConfig): http.Server {
       const claudeReq = JSON.parse(body);
       const openaiReq = buildOpenAIRequest(claudeReq, azure);
       const originalModel = claudeReq.model || '';
+      const deployment = getDeployment(originalModel, azure);
 
       if (verbose) {
-        console.log(`[PROXY] ${originalModel} -> ${openaiReq.model} (max_tokens=${openaiReq.max_completion_tokens})`);
+        console.log(`[PROXY] ${originalModel} -> deployment:${deployment}, model:${openaiReq.model} (max_tokens=${openaiReq.max_completion_tokens})`);
       }
 
       const azureUrl = new URL(
-        `/openai/deployments/${openaiReq.model}/chat/completions?api-version=${azure.apiVersion}`,
+        `/openai/deployments/${deployment}/chat/completions?api-version=${azure.apiVersion}`,
         azure.endpoint
       );
 

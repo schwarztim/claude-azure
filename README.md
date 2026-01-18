@@ -41,10 +41,18 @@ Get these from Azure Portal → Azure OpenAI → Keys and Endpoint
 ? Azure OpenAI API Key: ********
 ? API Version: 2024-12-01-preview
 
-Model Deployments
+Deployment Mode
+? Select deployment mode:
+  ❯ Tiered - Separate deployments for different model sizes
+    Model Router - Single deployment for all models
+
+# For Tiered mode:
 ? Opus/Large model deployment: gpt-4o
 ? Sonnet/Medium model deployment: gpt-4o
 ? Haiku/Small model deployment: gpt-4o-mini
+
+# For Model Router mode:
+? Model Router deployment name: model-router
 
 ✔ Testing Azure connection...
 ✓ Configuration saved!
@@ -73,7 +81,19 @@ claude-azure -p "explain this codebase"
 
 Config stored in `~/.claude-azure/config.json`
 
-### Model Mapping
+### Deployment Modes
+
+**Tiered Mode** (Traditional)
+- Separate Azure deployments for each model size
+- Maps claude-opus-* → opus deployment, claude-sonnet-* → sonnet deployment, etc.
+- Best for: Fine-grained control, different models per tier, cost optimization
+
+**Model Router Mode** (Azure APIM)
+- Single deployment endpoint that routes based on model name in request
+- Passes original Claude model name (e.g., "claude-sonnet-4") to the router
+- Best for: Azure API Management routing, dynamic model selection, simplified setup
+
+### Model Mapping (Tiered Mode)
 
 | Claude Model | Maps To Your Deployment |
 |--------------|-------------------------|

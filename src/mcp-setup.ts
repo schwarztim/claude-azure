@@ -9,6 +9,7 @@ import { join } from 'path';
 
 const MCP_DIR = join(homedir(), '.claude-azure', 'mcps');
 const MCP_CONFIG = join(homedir(), '.claude', 'user-mcps.json');
+const SETTINGS_FILE = join(homedir(), '.claude', 'settings.json');
 const WEB_SEARCH_REPO = 'https://github.com/schwarztim/web-search-mcp.git';
 
 export function isMcpInstalled(): boolean {
@@ -64,6 +65,34 @@ export async function installWebSearchMcp(verbose = false): Promise<boolean> {
   }
 }
 
+function enableMcpInSettings(mcpName: string, verbose = false): boolean {
+  try {
+    if (!existsSync(SETTINGS_FILE)) {
+      if (verbose) console.log('settings.json not found, skipping enable');
+      return false;
+    }
+
+    const settings = JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8'));
+
+    // Ensure enabledMcpjsonServers exists
+    if (!settings.enabledMcpjsonServers) {
+      settings.enabledMcpjsonServers = [];
+    }
+
+    // Add MCP if not already enabled
+    if (!settings.enabledMcpjsonServers.includes(mcpName)) {
+      settings.enabledMcpjsonServers.push(mcpName);
+      writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+      if (verbose) console.log(`Enabled ${mcpName} in settings.json`);
+    }
+
+    return true;
+  } catch (error: any) {
+    if (verbose) console.error('Failed to enable MCP in settings:', error.message);
+    return false;
+  }
+}
+
 export function registerWebSearchMcp(verbose = false): boolean {
   const indexPath = join(MCP_DIR, 'web-search-mcp', 'dist', 'index.js');
 
@@ -91,6 +120,9 @@ export function registerWebSearchMcp(verbose = false): boolean {
 
     // Write back
     writeFileSync(MCP_CONFIG, JSON.stringify(config, null, 2));
+
+    // Also enable in settings.json
+    enableMcpInSettings('web-search', verbose);
 
     if (verbose) console.log(`Registered web-search MCP in ${MCP_CONFIG}`);
     return true;

@@ -10,10 +10,11 @@ export interface AzureConfig {
   apiKey: string;
   apiVersion: string;
   deployments: {
-    opus: string;
-    sonnet: string;
-    haiku: string;
+    opus?: string;
+    sonnet?: string;
+    haiku?: string;
   };
+  router?: string; // Single deployment for model router mode
 }
 
 export interface AppConfig {
