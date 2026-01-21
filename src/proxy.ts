@@ -524,9 +524,8 @@ export function createProxy(config: ProxyConfig): http.Server {
             ? firstMessage.content.map((b: any) => (typeof b === 'string' ? b : b.text || '')).join('')
             : '');
 
-      // Skip quota checks
+      // Skip quota checks (silent - no logging unless verbose)
       if (firstMessage?.content === 'quota' || messageContent.includes('quota')) {
-        console.log('[PROXY] Skipping quota check request (warmup)');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           id: 'skip-' + Date.now(),
@@ -540,9 +539,8 @@ export function createProxy(config: ProxyConfig): http.Server {
         return;
       }
 
-      // Skip conversation title generation (expensive background task)
+      // Skip conversation title generation (silent - no logging unless verbose)
       if (messageContent.includes('Please write a 5-10 word title for the following conversation')) {
-        console.log('[PROXY] Skipping title generation request (background task)');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           id: 'skip-' + Date.now(),
