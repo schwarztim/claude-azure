@@ -230,12 +230,11 @@ function buildOpenAIRequest(claudeReq: any, config: AzureConfig, useResponsesAPI
   const maxTokens = claudeReq.max_tokens || 64000;
   let messages = convertMessages(claudeReq.messages || [], claudeReq.system, useResponsesAPI);
 
-  // For Responses API, ensure no null content (must be string, array, or omitted)
+  // For Responses API, ensure no null content (must be string or array, use empty string as fallback)
   if (useResponsesAPI) {
     messages = messages.map((msg: any) => {
       if (msg.content === null || msg.content === undefined) {
-        const { content, ...rest } = msg;
-        return rest;
+        return { ...msg, content: '' };
       }
       return msg;
     });
