@@ -19,6 +19,33 @@ function sseEvent(event: string, data: any): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+function isResponsesApiVersion(apiVersion: string): boolean {
+  return apiVersion.startsWith('2025-04-01') || apiVersion.startsWith('2024-08-01');
+}
+
+function shouldUseResponsesAPI(config: AzureConfig): boolean {
+  return !!config.router || isResponsesApiVersion(config.apiVersion);
+}
+
+function buildResponsesUrls(azure: AzureConfig, deployment: string): URL[] {
+  const versions = [azure.apiVersion, '2025-04-01-preview'];
+  const seen = new Set<string>();
+  const urls: URL[] = [];
+
+  for (const version of versions) {
+    if (!version || seen.has(version)) continue;
+    seen.add(version);
+    // For router mode, try non-deployment endpoint first (APIM model router)
+    if (azure.router) {
+      urls.push(new URL(`/openai/responses?api-version=${version}`, azure.endpoint));
+    }
+    // Then try deployment-specific endpoint as fallback
+    urls.push(new URL(`/openai/deployments/${deployment}/responses?api-version=${version}`, azure.endpoint));
+  }
+
+  return urls;
+}
+
 // Get deployment name for URL (Azure deployment endpoint)
 function getDeployment(model: string, config: AzureConfig): string {
   // If router deployment is configured, use it for all models
@@ -35,9 +62,10 @@ function getDeployment(model: string, config: AzureConfig): string {
 
 // Get model name for request body (what the router should select)
 function getModelName(model: string, config: AzureConfig): string {
-  // If using router, pass through the original model name so router can select dynamically
+  // If using router, use the router deployment name
+  // (APIM routers expect the deployment name, not Claude model names)
   if (config.router) {
-    return model;
+    return config.router;
   }
 
   // Otherwise, use the deployment name (tiered mode)
@@ -45,10 +73,10 @@ function getModelName(model: string, config: AzureConfig): string {
 }
 
 // Convert Claude messages to OpenAI format (handles tool_use, tool_result, images)
-function convertMessages(claudeMessages: any[], system?: any): any[] {
+function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: boolean = false): any[] {
   const messages: any[] = [];
 
-  // Add system message first
+  // Add system message first (both endpoints support this)
   if (system) {
     if (typeof system === 'string') {
       messages.push({ role: 'system', content: system });
@@ -82,14 +110,20 @@ function convertMessages(claudeMessages: any[], system?: any): any[] {
         const blockType = block.type || '';
 
         if (blockType === 'text') {
-          textParts.push({ type: 'text', text: block.text || '' });
+          // Responses API uses different content types than Chat Completions
+          const textType = useResponsesAPI
+            ? (role === 'assistant' ? 'output_text' : 'input_text')
+            : 'text';
+          textParts.push({ type: textType, text: block.text || '' });
         } else if (blockType === 'image') {
           const source = block.source || {};
           if (source.type === 'base64') {
             const mediaType = source.media_type || 'image/png';
             const data = source.data || '';
+            // Responses API uses 'input_image' type
+            const imageType = useResponsesAPI ? 'input_image' : 'image_url';
             imageParts.push({
-              type: 'image_url',
+              type: imageType,
               image_url: { url: `data:${mediaType};base64,${data}` },
             });
           }
@@ -157,78 +191,211 @@ function convertMessages(claudeMessages: any[], system?: any): any[] {
   return messages;
 }
 
-// Convert Claude tools to OpenAI function format
-function convertTools(claudeTools: any[]): any[] {
+// Convert Claude tools to OpenAI/Azure function format
+function convertTools(claudeTools: any[], useResponsesAPI: boolean = false): any[] {
   return claudeTools.map((tool) => {
-    if (tool.type === 'function') return tool;
-    return {
-      type: 'function',
-      function: {
-        name: tool.name || '',
-        description: tool.description || '',
-        parameters: tool.input_schema || { type: 'object', properties: {} },
-      },
-    };
+    // If already in OpenAI format, return as-is for Chat Completions
+    if (tool.type === 'function' && !useResponsesAPI) return tool;
+
+    if (useResponsesAPI) {
+      // Responses API uses a flatter structure with name/description/parameters at root
+      return {
+        type: 'function',
+        name: tool.name || tool.function?.name || '',
+        description: tool.description || tool.function?.description || '',
+        parameters: tool.input_schema || tool.function?.parameters || { type: 'object', properties: {} },
+      };
+    } else {
+      // Chat Completions API nests name/description/parameters inside function
+      return {
+        type: 'function',
+        function: {
+          name: tool.name || '',
+          description: tool.description || '',
+          parameters: tool.input_schema || { type: 'object', properties: {} },
+        },
+      };
+    }
   });
 }
 
 // Build OpenAI request from Claude request
-function buildOpenAIRequest(claudeReq: any, config: AzureConfig): any {
+function buildOpenAIRequest(claudeReq: any, config: AzureConfig, useResponsesAPI: boolean = false): any {
+  const maxTokens = claudeReq.max_tokens || 64000;
+  const messages = convertMessages(claudeReq.messages || [], claudeReq.system, false);
+
   const req: any = {
     model: getModelName(claudeReq.model || '', config),
-    messages: convertMessages(claudeReq.messages || [], claudeReq.system),
     stream: claudeReq.stream || false,
   };
 
-  // Use max_completion_tokens (required for newer models like GPT-5.2)
-  const maxTokens = claudeReq.max_tokens || 64000;
-  req.max_completion_tokens = Math.max(4096, Math.min(maxTokens, 128000));
+  if (useResponsesAPI) {
+    // Responses API uses 'input' and 'max_output_tokens'
+    req.input = messages;
+    req.max_output_tokens = Math.max(4096, Math.min(maxTokens, 128000));
+  } else {
+    // Chat Completions API uses 'messages' and 'max_completion_tokens'
+    req.messages = messages;
+    req.max_completion_tokens = Math.max(4096, Math.min(maxTokens, 128000));
+  }
 
   if (claudeReq.temperature !== undefined) {
     req.temperature = claudeReq.temperature;
   }
 
   if (claudeReq.tools && claudeReq.tools.length > 0) {
-    req.tools = convertTools(claudeReq.tools);
+    // Azure /responses endpoint expects tools with name at root (Responses API format)
+    // but other fields use Chat Completions format
+    req.tools = convertTools(claudeReq.tools, useResponsesAPI);
+  }
+
+  const reasoningEffort = config.reasoningEffort;
+  if (reasoningEffort) {
+    const modelName = String(req.model || '').toLowerCase();
+    const targetModel = config.reasoningModel?.toLowerCase();
+    const shouldApplyReasoning =
+      (targetModel && (modelName === targetModel || !!config.router)) ||
+      (!targetModel && modelName.includes('gpt-5'));
+    if (shouldApplyReasoning) {
+      if (useResponsesAPI) {
+        req.reasoning = { effort: reasoningEffort };
+      } else {
+        req.reasoning_effort = reasoningEffort;
+      }
+    }
   }
 
   return req;
 }
 
-// Convert OpenAI response to Claude format
-function convertResponse(openaiRes: any, model: string): any {
-  const choice = openaiRes.choices?.[0] || {};
-  const message = choice.message || {};
+// Convert OpenAI/Azure response to Claude format
+function convertResponse(openaiRes: any, model: string, _useResponsesAPI: boolean = false): any {
   const content: any[] = [];
 
-  if (message.content) {
-    content.push({ type: 'text', text: message.content });
+  if (openaiRes.choices?.length) {
+    const choice = openaiRes.choices?.[0] || {};
+    const message = choice.message || {};
+
+    if (message.content) {
+      content.push({ type: 'text', text: message.content });
+    }
+
+    if (message.tool_calls) {
+      for (const tc of message.tool_calls) {
+        let input = {};
+        try {
+          input = JSON.parse(tc.function?.arguments || '{}');
+        } catch {
+          input = {};
+        }
+        content.push({
+          type: 'tool_use',
+          id: tc.id || '',
+          name: tc.function?.name || '',
+          input,
+        });
+      }
+    }
+
+    const finishReason = choice.finish_reason || 'stop';
+    const stopReasonMap: Record<string, string> = {
+      stop: 'end_turn',
+      length: 'max_tokens',
+      tool_calls: 'tool_use',
+      content_filter: 'end_turn',
+    };
+
+    return {
+      id: openaiRes.id || `msg_${Date.now()}`,
+      type: 'message',
+      role: 'assistant',
+      content,
+      model,
+      stop_reason: stopReasonMap[finishReason] || 'end_turn',
+      stop_sequence: null,
+      usage: {
+        input_tokens: openaiRes.usage?.prompt_tokens || openaiRes.usage?.input_tokens || 0,
+        output_tokens: openaiRes.usage?.completion_tokens || openaiRes.usage?.output_tokens || 0,
+      },
+    };
   }
 
-  if (message.tool_calls) {
-    for (const tc of message.tool_calls) {
-      let input = {};
+  const textParts: string[] = [];
+  const toolUses: any[] = [];
+
+  const pushToolUse = (id: string, name: string, args: any) => {
+    let input = {};
+    if (typeof args === 'string') {
       try {
-        input = JSON.parse(tc.function?.arguments || '{}');
+        input = JSON.parse(args);
       } catch {
         input = {};
       }
-      content.push({
-        type: 'tool_use',
-        id: tc.id || '',
-        name: tc.function?.name || '',
-        input,
-      });
+    } else if (args && typeof args === 'object') {
+      input = args;
+    }
+    toolUses.push({ type: 'tool_use', id: id || '', name: name || '', input });
+  };
+
+  const extractToolCall = (item: any) => {
+    if (!item) return null;
+    if (item.type === 'tool_call' || item.type === 'function_call') {
+      return {
+        id: item.id || '',
+        name: item.name || item.tool_name || item.function?.name || '',
+        args: item.arguments || item.tool_arguments || item.function?.arguments || '{}',
+      };
+    }
+    if (item.type === 'tool' && item.name) {
+      return {
+        id: item.id || '',
+        name: item.name || '',
+        args: item.arguments || item.input || '{}',
+      };
+    }
+    return null;
+  };
+
+  if (typeof openaiRes.output_text === 'string') {
+    textParts.push(openaiRes.output_text);
+  }
+
+  if (Array.isArray(openaiRes.output)) {
+    for (const item of openaiRes.output) {
+      if (item?.type === 'message') {
+        const itemContent = item.content;
+        if (typeof itemContent === 'string') {
+          textParts.push(itemContent);
+        } else if (Array.isArray(itemContent)) {
+          for (const block of itemContent) {
+            if (block?.type === 'output_text' || block?.type === 'text') {
+              textParts.push(block.text || '');
+            }
+            const toolCall = extractToolCall(block);
+            if (toolCall) {
+              pushToolUse(toolCall.id, toolCall.name, toolCall.args);
+            }
+          }
+        }
+      } else {
+        const toolCall = extractToolCall(item);
+        if (toolCall) {
+          pushToolUse(toolCall.id, toolCall.name, toolCall.args);
+        }
+      }
     }
   }
 
-  const finishReason = choice.finish_reason || 'stop';
-  const stopReasonMap: Record<string, string> = {
-    stop: 'end_turn',
-    length: 'max_tokens',
-    tool_calls: 'tool_use',
-    content_filter: 'end_turn',
-  };
+  if (textParts.length > 0) {
+    content.push({ type: 'text', text: textParts.join('') });
+  }
+  if (toolUses.length > 0) {
+    content.push(...toolUses);
+  }
+
+  const usage = openaiRes.usage || {};
+  const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+  const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
 
   return {
     id: openaiRes.id || `msg_${Date.now()}`,
@@ -236,11 +403,11 @@ function convertResponse(openaiRes: any, model: string): any {
     role: 'assistant',
     content,
     model,
-    stop_reason: stopReasonMap[finishReason] || 'end_turn',
+    stop_reason: 'end_turn',
     stop_sequence: null,
     usage: {
-      input_tokens: openaiRes.usage?.prompt_tokens || 0,
-      output_tokens: openaiRes.usage?.completion_tokens || 0,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
     },
   };
 }
@@ -290,20 +457,48 @@ export function createProxy(config: ProxyConfig): http.Server {
 
     try {
       const claudeReq = JSON.parse(body);
-      const openaiReq = buildOpenAIRequest(claudeReq, azure);
       const originalModel = claudeReq.model || '';
       const deployment = getDeployment(originalModel, azure);
+      const wantsStream = !!claudeReq.stream;
 
-      if (verbose) {
-        console.log(`[PROXY] ${originalModel} -> deployment:${deployment}, model:${openaiReq.model} (max_tokens=${openaiReq.max_completion_tokens})`);
+      // Determine if we should use Responses API (when router is configured)
+      const useResponsesAPI = shouldUseResponsesAPI(azure);
+      const openaiReq = buildOpenAIRequest(claudeReq, azure, useResponsesAPI);
+      if (useResponsesAPI) {
+        openaiReq.stream = false;
       }
 
-      const azureUrl = new URL(
-        `/openai/deployments/${deployment}/chat/completions?api-version=${azure.apiVersion}`,
-        azure.endpoint
-      );
+      if (verbose) {
+        const apiEndpoint = useResponsesAPI ? 'responses' : `deployments/${deployment}/chat/completions`;
+        const maxTokens =
+          openaiReq.max_completion_tokens ?? openaiReq.max_output_tokens ?? openaiReq.max_tokens ?? 'unknown';
+        console.log(`[PROXY] ${originalModel} -> ${deployment} @ ${azure.endpoint}/openai/${apiEndpoint}?api-version=${azure.apiVersion} (max_tokens=${maxTokens})`);
+        console.log(`[PROXY] Sending ${useResponsesAPI ? '/responses endpoint' : 'Chat Completions'} request to Azure...`);
+        console.log(`[PROXY] Request payload: ${JSON.stringify(openaiReq).substring(0, 200)}...`);
+      }
 
-      const reqOptions: https.RequestOptions = {
+      const azureUrls = useResponsesAPI
+        ? buildResponsesUrls(azure, deployment)
+        : [
+            new URL(
+              `/openai/deployments/${deployment}/chat/completions?api-version=${azure.apiVersion}`,
+              azure.endpoint
+            ),
+          ];
+
+      // Don't add Chat Completions fallback for router mode
+      // (router deployments like gpt-5.2-codex only work with Responses API)
+      if (useResponsesAPI && !azure.router) {
+        // For non-router mode, add Chat Completions as fallback
+        azureUrls.push(
+          new URL(
+            `/openai/deployments/${deployment}/chat/completions?api-version=${azure.apiVersion}`,
+            azure.endpoint
+          )
+        );
+      }
+
+      const reqOptionsList: https.RequestOptions[] = azureUrls.map((azureUrl) => ({
         hostname: azureUrl.hostname,
         port: 443,
         path: azureUrl.pathname + azureUrl.search,
@@ -312,12 +507,16 @@ export function createProxy(config: ProxyConfig): http.Server {
           'Content-Type': 'application/json',
           'api-key': azure.apiKey,
         },
-      };
+      }));
 
-      if (openaiReq.stream) {
-        await handleStreaming(res, reqOptions, openaiReq, originalModel, verbose);
+      if (wantsStream) {
+        if (useResponsesAPI) {
+          await handleStreamingFromNonStreaming(res, reqOptionsList, openaiReq, originalModel, verbose, useResponsesAPI);
+        } else {
+          await handleStreaming(res, reqOptionsList[0], openaiReq, originalModel, verbose, useResponsesAPI);
+        }
       } else {
-        await handleNonStreaming(res, reqOptions, openaiReq, originalModel, verbose);
+        await handleNonStreaming(res, reqOptionsList, openaiReq, originalModel, verbose, useResponsesAPI);
       }
     } catch (error: any) {
       console.error('[PROXY] Error:', error.message);
@@ -333,12 +532,98 @@ export function createProxy(config: ProxyConfig): http.Server {
   return server;
 }
 
+function formatRequestTarget(options: https.RequestOptions): string {
+  const host = options.hostname || 'unknown-host';
+  const path = options.path || '';
+  return `https://${host}${path}`;
+}
+
+function requestJson(options: https.RequestOptions, payload: any): Promise<{ statusCode: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const azureReq = https.request(options, (azureRes) => {
+      let body = '';
+      azureRes.on('data', (chunk) => { body += chunk; });
+      azureRes.on('end', () => {
+        resolve({ statusCode: azureRes.statusCode || 0, body });
+      });
+    });
+
+    azureReq.on('error', (err) => {
+      reject(err);
+    });
+
+    azureReq.write(JSON.stringify(payload));
+    azureReq.end();
+  });
+}
+
+async function requestWithFallback(
+  optionsList: https.RequestOptions[],
+  payload: any,
+  verbose: boolean
+): Promise<{ statusCode: number; body: string; options: https.RequestOptions }> {
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < optionsList.length; i++) {
+    const options = optionsList[i];
+
+    // Adapt payload based on endpoint type
+    let currentPayload = payload;
+    if (options.path?.includes('/chat/completions') && payload.input) {
+      // Convert Responses API format to Chat Completions format
+      currentPayload = { ...payload };
+      currentPayload.messages = payload.input;
+      delete currentPayload.input;
+      if (payload.max_output_tokens) {
+        currentPayload.max_completion_tokens = payload.max_output_tokens;
+        delete currentPayload.max_output_tokens;
+      }
+    }
+
+    if (verbose) {
+      console.log(`[PROXY] Trying endpoint ${i + 1}/${optionsList.length}: ${formatRequestTarget(options)}`);
+    }
+
+    try {
+      const result = await requestJson(options, currentPayload);
+      // Only retry on 404 (endpoint not found), not 400 (bad request)
+      if (result.statusCode === 404 && i < optionsList.length - 1) {
+        if (verbose) {
+          console.log(`[PROXY] Azure 404 from ${formatRequestTarget(options)}; retrying...`);
+        }
+        continue;
+      }
+      // Log 400 errors but don't retry (they won't work on different endpoints)
+      if (result.statusCode === 400 && verbose) {
+        console.log(`[PROXY] Azure 400 (bad request) from ${formatRequestTarget(options)}`);
+        console.log(`[PROXY] Error detail: ${result.body.substring(0, 200)}`);
+      }
+      if (verbose && result.statusCode === 200) {
+        console.log(`[PROXY] Success with endpoint: ${formatRequestTarget(options)}`);
+      }
+      return { ...result, options };
+    } catch (err: any) {
+      lastError = err;
+      if (i < optionsList.length - 1) {
+        if (verbose) {
+          console.log(`[PROXY] Azure request error from ${formatRequestTarget(options)}: ${err.message}; retrying...`);
+        }
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError || new Error('Azure request failed');
+}
+
 async function handleStreaming(
   res: http.ServerResponse,
   options: https.RequestOptions,
   openaiReq: any,
   model: string,
-  verbose: boolean
+  verbose: boolean,
+  useResponsesAPI: boolean = false
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     res.writeHead(200, {
@@ -555,53 +840,165 @@ async function handleStreaming(
   });
 }
 
-async function handleNonStreaming(
+async function handleStreamingFromNonStreaming(
   res: http.ServerResponse,
-  options: https.RequestOptions,
+  optionsList: https.RequestOptions[],
   openaiReq: any,
   model: string,
-  verbose: boolean
+  verbose: boolean,
+  useResponsesAPI: boolean = false
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const azureReq = https.request(options, (azureRes) => {
-      let body = '';
-
-      azureRes.on('data', (chunk) => { body += chunk; });
-
-      azureRes.on('end', () => {
-        try {
-          if (azureRes.statusCode !== 200) {
-            console.error(`[PROXY] Azure error ${azureRes.statusCode}: ${body}`);
-            res.writeHead(azureRes.statusCode || 500, { 'Content-Type': 'application/json' });
-            res.end(body);
-            resolve();
-            return;
-          }
-
-          const data = JSON.parse(body);
-          const response = convertResponse(data, model);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(response));
-          resolve();
-        } catch (error: any) {
-          console.error('[PROXY] Parse error:', error.message);
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: { message: error.message } }));
-          reject(error);
-        }
-      });
-    });
-
-    azureReq.on('error', (err) => {
-      console.error('[PROXY] Request error:', err);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { message: err.message } }));
-      reject(err);
-    });
-
-    azureReq.write(JSON.stringify(openaiReq));
-    azureReq.end();
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
   });
+
+  const msgId = `msg_${Date.now()}`;
+  res.write(sseEvent('message_start', {
+    type: 'message_start',
+    message: {
+      id: msgId,
+      type: 'message',
+      role: 'assistant',
+      content: [],
+      model,
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  }));
+
+  const writeError = (message: string) => {
+    res.write(sseEvent('content_block_start', {
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'text', text: '' },
+    }));
+    res.write(sseEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: message },
+    }));
+    res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }));
+    res.write(sseEvent('message_delta', {
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: { output_tokens: 0 },
+    }));
+    res.write(sseEvent('message_stop', { type: 'message_stop' }));
+    res.end();
+  };
+
+  try {
+    const { statusCode, body } = await requestWithFallback(optionsList, openaiReq, verbose);
+    if (statusCode !== 200) {
+      console.error(`[PROXY] Error response: ${statusCode}`);
+      console.error(`[PROXY] Error detail: ${body}`);
+      writeError(`Error from Azure: ${body}`);
+      return;
+    }
+
+    const data = JSON.parse(body);
+    const response = convertResponse(data, model, useResponsesAPI);
+    const responseContent = response.content || [];
+
+    if (responseContent.length === 0) {
+      res.write(sseEvent('content_block_start', {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'text', text: '' },
+      }));
+      res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }));
+    } else {
+      let index = 0;
+      for (const block of responseContent) {
+        if (block.type === 'text') {
+          res.write(sseEvent('content_block_start', {
+            type: 'content_block_start',
+            index,
+            content_block: { type: 'text', text: '' },
+          }));
+          res.write(sseEvent('content_block_delta', {
+            type: 'content_block_delta',
+            index,
+            delta: { type: 'text_delta', text: block.text || '' },
+          }));
+          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index }));
+          index += 1;
+        } else if (block.type === 'tool_use') {
+          res.write(sseEvent('content_block_start', {
+            type: 'content_block_start',
+            index,
+            content_block: {
+              type: 'tool_use',
+              id: block.id || '',
+              name: block.name || '',
+              input: {},
+            },
+          }));
+          const payload = JSON.stringify(block.input || {});
+          res.write(sseEvent('content_block_delta', {
+            type: 'content_block_delta',
+            index,
+            delta: { type: 'input_json_delta', partial_json: payload },
+          }));
+          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index }));
+          index += 1;
+        }
+      }
+    }
+
+    res.write(sseEvent('message_delta', {
+      type: 'message_delta',
+      delta: { stop_reason: response.stop_reason || 'end_turn', stop_sequence: null },
+      usage: { output_tokens: response.usage?.output_tokens || 0 },
+    }));
+    res.write(sseEvent('message_stop', { type: 'message_stop' }));
+    res.end();
+  } catch (error: any) {
+    console.error('[PROXY] Request error:', error.message);
+    writeError(`Error from Azure: ${error.message}`);
+  }
+}
+
+async function handleNonStreaming(
+  res: http.ServerResponse,
+  optionsList: https.RequestOptions[] | https.RequestOptions,
+  openaiReq: any,
+  model: string,
+  verbose: boolean,
+  useResponsesAPI: boolean = false
+): Promise<void> {
+  const optionsArray = Array.isArray(optionsList) ? optionsList : [optionsList];
+
+  try {
+    const { statusCode, body } = await requestWithFallback(optionsArray, openaiReq, verbose);
+    if (statusCode !== 200) {
+      console.error(`[PROXY] Error response: ${statusCode}`);
+      console.error(`[PROXY] Error detail: ${body}`);
+      res.writeHead(statusCode || 500, { 'Content-Type': 'application/json' });
+      res.end(body);
+      return;
+    }
+
+    const data = JSON.parse(body);
+    if (verbose) {
+      console.log(`[PROXY] Response status: ${statusCode}`);
+      console.log(`[PROXY] Response preview: ${body.substring(0, 200)}...`);
+    }
+    const response = convertResponse(data, model, useResponsesAPI);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(response));
+  } catch (error: any) {
+    console.error('[PROXY] Request error:', error.message);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+    }
+    if (!res.writableEnded) {
+      res.end(JSON.stringify({ error: { message: error.message } }));
+    }
+  }
 }
 
 export function startProxy(config: ProxyConfig): Promise<void> {

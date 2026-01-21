@@ -8,7 +8,8 @@ import { existsSync } from 'fs';
 import chalk from 'chalk';
 import ora from 'ora';
 import { program } from 'commander';
-import { getConfig, configExists, clearConfig } from './config.js';
+import inquirer from 'inquirer';
+import { getConfig, setConfig, configExists, clearConfig } from './config.js';
 import { runWizard } from './wizard.js';
 import { startProxy } from './proxy.js';
 import { checkForUpdates, doUpdate } from './updater.js';
@@ -150,6 +151,69 @@ async function main() {
     const child = spawn(claudeBinary, claudeArgs, { env, stdio: 'inherit' });
     child.on('exit', (code) => process.exit(code || 0));
     return;
+  }
+
+  // Prompt for reasoning effort when using gpt-5.* deployments
+  if (config.provider === 'azure' && config.azure) {
+    const deploymentNames = [
+      config.azure.router,
+      config.azure.deployments?.opus,
+      config.azure.deployments?.sonnet,
+      config.azure.deployments?.haiku,
+    ].filter(Boolean) as string[];
+    const reasoningModel =
+      deploymentNames.find((name) => name.toLowerCase() === 'gpt-5.2-codex') ||
+      deploymentNames.find((name) => name.toLowerCase().includes('gpt-5'));
+
+    if (reasoningModel) {
+      const current = config.azure.reasoningEffort || 'medium';
+      const choices = [
+        {
+          value: 'low',
+          label: 'Low',
+          description: 'Fast responses with lighter reasoning',
+        },
+        {
+          value: 'medium',
+          label: 'Medium',
+          description: 'Balances speed and reasoning depth for everyday tasks',
+        },
+        {
+          value: 'high',
+          label: 'High',
+          description: 'Greater reasoning depth for complex problems',
+        },
+        {
+          value: 'extra_high',
+          label: 'Extra high',
+          description: 'Extra high reasoning depth for complex problems',
+          warning: '⚠ Extra high reasoning effort can quickly consume Plus plan',
+        },
+      ].map((choice) => {
+        const isCurrent = choice.value === current;
+        const isDefault = choice.value === 'medium';
+        const suffix = isCurrent ? ' (current)' : isDefault ? ' (default)' : '';
+        const warning = choice.warning ? ` ${chalk.yellow(choice.warning)}` : '';
+        return {
+          value: choice.value,
+          name: `${choice.label}${suffix}  ${chalk.gray(choice.description)}${warning}`,
+        };
+      });
+
+      const { reasoningEffort } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'reasoningEffort',
+          message: `Select Reasoning Level for ${reasoningModel}`,
+          choices,
+          default: current,
+        },
+      ]);
+
+      config.azure.reasoningEffort = reasoningEffort;
+      config.azure.reasoningModel = reasoningModel;
+      setConfig(config);
+    }
   }
 
   // Need proxy for Azure/OpenAI

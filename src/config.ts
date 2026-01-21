@@ -15,6 +15,8 @@ export interface AzureConfig {
     haiku?: string;
   };
   router?: string; // Single deployment for model router mode
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'extra_high';
+  reasoningModel?: string;
 }
 
 export interface AppConfig {
