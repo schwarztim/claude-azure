@@ -1,6 +1,6 @@
 {
   "name": "claude-azure",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Claude Code with native Azure OpenAI support",
   "main": "dist/index.js",
   "bin": {
@@ -21,6 +21,14 @@
   ],
   "author": "Tim Schwarz",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schwarztim/claude-azure.git"
+  },
+  "homepage": "https://github.com/schwarztim/claude-azure#readme",
+  "bugs": {
+    "url": "https://github.com/schwarztim/claude-azure/issues"
+  },
   "dependencies": {
     "axios": "^1.6.0",
     "chalk": "^5.3.0",

@@ -63,7 +63,7 @@ export async function checkForUpdates(verbose = false): Promise<string | null> {
   // Use cache if fresh
   if (cache && now - cache.lastCheck < CACHE_DURATION) {
     if (cache.latestSha !== cache.currentSha) {
-      return `\x1b[33m● Update available!\x1b[0m Run: cd ~/Scripts/claude-azure && git pull && npm run build`;
+      return `\x1b[33m● Update available!\x1b[0m Run: claude-azure --update`;
     }
     return null;
   }
@@ -87,7 +87,7 @@ export async function checkForUpdates(verbose = false): Promise<string | null> {
       saveCache({ lastCheck: now, latestSha, currentSha });
 
       if (latestSha !== currentSha && currentSha !== 'unknown') {
-        return `\x1b[33m● Update available!\x1b[0m Run: cd ~/Scripts/claude-azure && git pull && npm run build`;
+        return `\x1b[33m● Update available!\x1b[0m Run: claude-azure --update`;
       }
     }
   } catch {

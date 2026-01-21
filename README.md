@@ -57,10 +57,22 @@
 
 ### Installation
 
+#### Option 1: npm (Recommended)
+
+```bash
+# Install globally from npm
+npm install -g claude-azure
+
+# Run setup wizard
+claude-azure
+```
+
+#### Option 2: From Source
+
 ```bash
 # Clone and install
-git clone https://github.com/schwarztim/claude-azure.git ~/Scripts/claude-azure
-cd ~/Scripts/claude-azure
+git clone https://github.com/schwarztim/claude-azure.git
+cd claude-azure
 npm install
 npm run build
 npm link
@@ -68,6 +80,8 @@ npm link
 # Run setup wizard
 claude-azure
 ```
+
+**Windows Users:** Works on PowerShell, Command Prompt, and WSL. Claude Code must be installed first.
 
 ### First Run
 

@@ -5,6 +5,8 @@
 import { spawn, execFileSync } from 'child_process';
 import { createServer } from 'net';
 import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { program } from 'commander';
@@ -29,19 +31,29 @@ function findFreePort(): Promise<number> {
 
 // Find claude binary
 function findClaude(): string | null {
-  const commonPaths = [
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-    `${process.env.HOME}/.local/bin/claude`,
-    `${process.env.HOME}/.claude/bin/claude`,
-  ];
+  const homeDir = homedir();
+  const isWindows = process.platform === 'win32';
+
+  const commonPaths = isWindows
+    ? [
+        join(homeDir, 'AppData', 'Local', 'Programs', 'Claude', 'claude.exe'),
+        join(homeDir, '.claude', 'bin', 'claude.exe'),
+        join(homeDir, '.local', 'bin', 'claude.exe'),
+      ]
+    : [
+        '/usr/local/bin/claude',
+        '/opt/homebrew/bin/claude',
+        join(homeDir, '.local', 'bin', 'claude'),
+        join(homeDir, '.claude', 'bin', 'claude'),
+      ];
 
   for (const path of commonPaths) {
     if (existsSync(path)) return path;
   }
 
   try {
-    return execFileSync('which', ['claude'], { encoding: 'utf-8' }).trim() || null;
+    const whichCmd = isWindows ? 'where' : 'which';
+    return execFileSync(whichCmd, ['claude'], { encoding: 'utf-8' }).trim().split('\n')[0] || null;
   } catch {
     return null;
   }
