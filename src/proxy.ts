@@ -516,7 +516,19 @@ export function createProxy(config: ProxyConfig): http.Server {
           openaiReq.max_completion_tokens ?? openaiReq.max_output_tokens ?? openaiReq.max_tokens ?? 'unknown';
         console.log(`[PROXY] ${originalModel} -> ${deployment} @ ${azure.endpoint}/openai/${apiEndpoint}?api-version=${azure.apiVersion} (max_tokens=${maxTokens})`);
         console.log(`[PROXY] Sending ${useResponsesAPI ? '/responses endpoint' : 'Chat Completions'} request to Azure...`);
-        console.log(`[PROXY] Request payload: ${JSON.stringify(openaiReq).substring(0, 200)}...`);
+
+        // Show full messages if tool-like content detected
+        const messages = openaiReq.input || openaiReq.messages || [];
+        const hasToolContent = messages.some((msg: any) =>
+          typeof msg.content === 'string' && (msg.content.includes('[Tool:') || msg.content.includes('[Tool Result:'))
+        );
+
+        if (hasToolContent) {
+          console.log(`[PROXY] Tool usage detected - full payload:`);
+          console.log(JSON.stringify(openaiReq, null, 2));
+        } else {
+          console.log(`[PROXY] Request payload: ${JSON.stringify(openaiReq).substring(0, 200)}...`);
+        }
       }
 
       const azureUrls = useResponsesAPI
@@ -635,10 +647,20 @@ async function requestWithFallback(
         }
         continue;
       }
-      // Log 400 errors but don't retry (they won't work on different endpoints)
-      if (result.statusCode === 400 && verbose) {
-        console.log(`[PROXY] Azure 400 (bad request) from ${formatRequestTarget(options)}`);
-        console.log(`[PROXY] Error detail: ${result.body.substring(0, 200)}`);
+      // Log error responses with full detail for debugging
+      if (result.statusCode !== 200 && verbose) {
+        console.log(`[PROXY] Azure error ${result.statusCode} from ${formatRequestTarget(options)}`);
+        // For 400/429 errors, log full body to understand what Azure is rejecting
+        if (result.statusCode === 400 || result.statusCode === 429) {
+          try {
+            const errorBody = JSON.parse(result.body);
+            console.log(`[PROXY] Error detail:`, JSON.stringify(errorBody, null, 2));
+          } catch {
+            console.log(`[PROXY] Error detail: ${result.body}`);
+          }
+        } else {
+          console.log(`[PROXY] Error detail: ${result.body.substring(0, 200)}`);
+        }
       }
       if (verbose && result.statusCode === 200) {
         console.log(`[PROXY] Success with endpoint: ${formatRequestTarget(options)}`);
