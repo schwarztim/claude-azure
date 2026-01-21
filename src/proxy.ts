@@ -145,8 +145,13 @@ function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: b
           },
         }));
 
-        const textContent = textParts.map((p) => p.text).join(' ') || null;
-        messages.push({ role: 'assistant', content: textContent, tool_calls: toolCalls });
+        const textContent = textParts.map((p) => p.text).join(' ').trim();
+        // For Responses API, content cannot be null - use empty string or omit
+        const msg: any = { role: 'assistant', tool_calls: toolCalls };
+        if (textContent || !useResponsesAPI) {
+          msg.content = textContent || null;
+        }
+        messages.push(msg);
       }
       // User with tool_result blocks
       else if (toolResultBlocks.length > 0) {
@@ -180,7 +185,8 @@ function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: b
       else if (textParts.length > 0 || imageParts.length > 0) {
         const combined = [...textParts, ...imageParts];
         if (combined.length === 1 && combined[0].type === 'text') {
-          messages.push({ role, content: combined[0].text });
+          // Ensure we don't send null content - use empty string as fallback
+          messages.push({ role, content: combined[0].text || '' });
         } else {
           messages.push({ role, content: combined });
         }
@@ -222,7 +228,18 @@ function convertTools(claudeTools: any[], useResponsesAPI: boolean = false): any
 // Build OpenAI request from Claude request
 function buildOpenAIRequest(claudeReq: any, config: AzureConfig, useResponsesAPI: boolean = false): any {
   const maxTokens = claudeReq.max_tokens || 64000;
-  const messages = convertMessages(claudeReq.messages || [], claudeReq.system, useResponsesAPI);
+  let messages = convertMessages(claudeReq.messages || [], claudeReq.system, useResponsesAPI);
+
+  // For Responses API, ensure no null content (must be string, array, or omitted)
+  if (useResponsesAPI) {
+    messages = messages.map((msg: any) => {
+      if (msg.content === null || msg.content === undefined) {
+        const { content, ...rest } = msg;
+        return rest;
+      }
+      return msg;
+    });
+  }
 
   const req: any = {
     model: getModelName(claudeReq.model || '', config),
