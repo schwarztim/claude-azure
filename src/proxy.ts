@@ -515,6 +515,25 @@ export function createProxy(config: ProxyConfig): http.Server {
 
     try {
       const claudeReq = JSON.parse(body);
+
+      // SKIP QUOTA CHECKS - these are Claude Code warmup requests
+      const firstMessage = claudeReq.messages?.[0];
+      if (firstMessage?.content === 'quota' ||
+          (typeof firstMessage?.content === 'string' && firstMessage.content.includes('quota'))) {
+        console.log('[PROXY] Skipping quota check request (warmup)');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 'skip-' + Date.now(),
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'ok' }],
+          model: claudeReq.model,
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }));
+        return;
+      }
+
       const originalModel = claudeReq.model || '';
       const deployment = getDeployment(originalModel, azure);
       const wantsStream = !!claudeReq.stream;
