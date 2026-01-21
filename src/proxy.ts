@@ -222,7 +222,7 @@ function convertTools(claudeTools: any[], useResponsesAPI: boolean = false): any
 // Build OpenAI request from Claude request
 function buildOpenAIRequest(claudeReq: any, config: AzureConfig, useResponsesAPI: boolean = false): any {
   const maxTokens = claudeReq.max_tokens || 64000;
-  const messages = convertMessages(claudeReq.messages || [], claudeReq.system, false);
+  const messages = convertMessages(claudeReq.messages || [], claudeReq.system, useResponsesAPI);
 
   const req: any = {
     model: getModelName(claudeReq.model || '', config),
