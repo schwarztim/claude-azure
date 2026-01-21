@@ -9,7 +9,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_URL = 'https://github.com/schwarztim/claude-code';
+const REPO_URL = 'https://github.com/schwarztim/claude-azure';
 const CACHE_FILE = join(homedir(), '.claude-azure', 'update-cache.json');
 const CACHE_DURATION = 3600000; // 1 hour
 
@@ -74,7 +74,7 @@ export async function checkForUpdates(verbose = false): Promise<string | null> {
     const timeout = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(
-      'https://api.github.com/repos/schwarztim/claude-code/commits/main',
+      'https://api.github.com/repos/schwarztim/claude-azure/commits/main',
       { signal: controller.signal }
     );
     clearTimeout(timeout);
