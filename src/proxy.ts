@@ -136,48 +136,74 @@ function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: b
 
       // Assistant with tool_use blocks
       if (role === 'assistant' && toolUseBlocks.length > 0) {
-        const toolCalls = toolUseBlocks.map((tb) => ({
-          id: tb.id || '',
-          type: 'function',
-          function: {
-            name: tb.name || '',
-            arguments: JSON.stringify(tb.input || {}),
-          },
-        }));
-
-        const textContent = textParts.map((p) => p.text).join(' ').trim();
-        // For Responses API, content cannot be null - use empty string or omit
-        const msg: any = { role: 'assistant', tool_calls: toolCalls };
-        if (textContent || !useResponsesAPI) {
-          msg.content = textContent || null;
+        // Responses API doesn't support tool_calls - convert to text format
+        if (useResponsesAPI) {
+          const toolText = toolUseBlocks
+            .map((tb) => `[Tool: ${tb.name}, Input: ${JSON.stringify(tb.input)}]`)
+            .join(' ');
+          const textContent = textParts.map((p) => p.text).join(' ').trim();
+          const combinedContent = [textContent, toolText].filter(Boolean).join(' ') || '';
+          messages.push({ role: 'assistant', content: combinedContent });
+        } else {
+          // Chat Completions API supports tool_calls
+          const toolCalls = toolUseBlocks.map((tb) => ({
+            id: tb.id || '',
+            type: 'function',
+            function: {
+              name: tb.name || '',
+              arguments: JSON.stringify(tb.input || {}),
+            },
+          }));
+          const textContent = textParts.map((p) => p.text).join(' ').trim();
+          messages.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
         }
-        messages.push(msg);
       }
       // User with tool_result blocks
       else if (toolResultBlocks.length > 0) {
-        for (const result of toolResultBlocks) {
-          let resultContent = result.content || '';
-          if (Array.isArray(resultContent)) {
-            resultContent = resultContent
-              .map((item: any) => (typeof item === 'string' ? item : item.text || ''))
-              .join('\n');
-          } else if (typeof resultContent !== 'string') {
-            resultContent = JSON.stringify(resultContent);
+        // Responses API doesn't support 'tool' role - convert to user message
+        if (useResponsesAPI) {
+          const toolResults = toolResultBlocks.map((result) => {
+            let resultContent = result.content || '';
+            if (Array.isArray(resultContent)) {
+              resultContent = resultContent
+                .map((item: any) => (typeof item === 'string' ? item : item.text || ''))
+                .join('\n');
+            } else if (typeof resultContent !== 'string') {
+              resultContent = JSON.stringify(resultContent);
+            }
+            const isError = result.is_error || false;
+            return `[Tool Result: ${isError ? 'Error: ' : ''}${resultContent}]`;
+          }).join(' ');
+
+          const textContent = textParts.map((p) => p.text).join(' ').trim();
+          const combinedContent = [textContent, toolResults].filter(Boolean).join(' ') || '';
+          messages.push({ role: 'user', content: combinedContent });
+        } else {
+          // Chat Completions API supports 'tool' role
+          for (const result of toolResultBlocks) {
+            let resultContent = result.content || '';
+            if (Array.isArray(resultContent)) {
+              resultContent = resultContent
+                .map((item: any) => (typeof item === 'string' ? item : item.text || ''))
+                .join('\n');
+            } else if (typeof resultContent !== 'string') {
+              resultContent = JSON.stringify(resultContent);
+            }
+
+            const isError = result.is_error || false;
+            messages.push({
+              role: 'tool',
+              tool_call_id: result.tool_use_id || '',
+              content: isError ? `Error: ${resultContent}` : resultContent,
+            });
           }
 
-          const isError = result.is_error || false;
-          messages.push({
-            role: 'tool',
-            tool_call_id: result.tool_use_id || '',
-            content: isError ? `Error: ${resultContent}` : resultContent,
-          });
-        }
-
-        // Also include any text content
-        if (textParts.length > 0) {
-          const combinedText = textParts.map((p) => p.text).join(' ').trim();
-          if (combinedText) {
-            messages.push({ role: 'user', content: combinedText });
+          // Also include any text content
+          if (textParts.length > 0) {
+            const combinedText = textParts.map((p) => p.text).join(' ').trim();
+            if (combinedText) {
+              messages.push({ role: 'user', content: combinedText });
+            }
           }
         }
       }
