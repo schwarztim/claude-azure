@@ -233,11 +233,13 @@ async function main() {
 
   // Show banner
   console.log();
-  console.log(
-    config.provider === 'azure'
-      ? chalk.blue('  ◖A◗') + chalk.gray(' Claude Azure')
-      : chalk.green('  ◖O◗') + chalk.gray(' Claude OpenAI')
-  );
+  if (config.provider === 'azure') {
+    console.log(chalk.blue('  ╔═╗'));
+    console.log(chalk.blue('  ║') + chalk.bold.blue('Q') + chalk.blue('║') + chalk.gray(' Claude Azure'));
+    console.log(chalk.blue('  ╚═╝'));
+  } else {
+    console.log(chalk.green('  ◖O◗') + chalk.gray(' Claude OpenAI'));
+  }
   console.log();
 
   // Start proxy
