@@ -72,6 +72,22 @@ function getModelName(model: string, config: AzureConfig): string {
   return getDeployment(model, config);
 }
 
+// Detect if request contains tool usage (tool_use or tool_result blocks)
+function hasToolUsage(messages: any[]): boolean {
+  for (const msg of messages) {
+    const content = msg.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        const blockType = block.type || '';
+        if (blockType === 'tool_use' || blockType === 'tool_result') {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // Convert Claude messages to OpenAI format (handles tool_use, tool_result, images)
 function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: boolean = false): any[] {
   const messages: any[] = [];
@@ -504,7 +520,15 @@ export function createProxy(config: ProxyConfig): http.Server {
       const wantsStream = !!claudeReq.stream;
 
       // Determine if we should use Responses API (when router is configured)
-      const useResponsesAPI = shouldUseResponsesAPI(azure);
+      // BUT: Don't use Responses API if request contains tool usage (tool_use/tool_result)
+      // because Responses API doesn't handle tools well (causes 429 internal errors)
+      const hasTools = hasToolUsage(claudeReq.messages || []);
+      const useResponsesAPI = shouldUseResponsesAPI(azure) && !hasTools;
+
+      if (verbose && hasTools && shouldUseResponsesAPI(azure)) {
+        console.log('[PROXY] Tool usage detected - forcing Chat Completions API instead of Responses API');
+      }
+
       const openaiReq = buildOpenAIRequest(claudeReq, azure, useResponsesAPI);
       if (useResponsesAPI) {
         openaiReq.stream = false;
