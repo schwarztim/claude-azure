@@ -520,15 +520,7 @@ export function createProxy(config: ProxyConfig): http.Server {
       const wantsStream = !!claudeReq.stream;
 
       // Determine if we should use Responses API (when router is configured)
-      // BUT: Don't use Responses API if request contains tool usage (tool_use/tool_result)
-      // because Responses API doesn't handle tools well (causes 429 internal errors)
-      const hasTools = hasToolUsage(claudeReq.messages || []);
-      const useResponsesAPI = shouldUseResponsesAPI(azure) && !hasTools;
-
-      if (verbose && hasTools && shouldUseResponsesAPI(azure)) {
-        console.log('[PROXY] Tool usage detected - forcing Chat Completions API instead of Responses API');
-      }
-
+      const useResponsesAPI = shouldUseResponsesAPI(azure);
       const openaiReq = buildOpenAIRequest(claudeReq, azure, useResponsesAPI);
       if (useResponsesAPI) {
         openaiReq.stream = false;

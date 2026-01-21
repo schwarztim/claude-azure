@@ -166,7 +166,13 @@ async function main() {
       deploymentNames.find((name) => name.toLowerCase().includes('gpt-5'));
 
     if (reasoningModel) {
-      const current = config.azure.reasoningEffort || 'medium';
+      const current = config.azure.reasoningEffort;
+
+      // Only prompt if not already configured AND running in interactive terminal
+      const shouldPrompt = !current && process.stdin.isTTY;
+      const reasoningEffort = current || 'medium'; // Default to medium if not set
+
+      if (shouldPrompt) {
       const choices = [
         {
           value: 'low',
@@ -200,19 +206,25 @@ async function main() {
         };
       });
 
-      const { reasoningEffort } = await inquirer.prompt([
+      const promptResult = await inquirer.prompt([
         {
           type: 'list',
           name: 'reasoningEffort',
           message: `Select Reasoning Level for ${reasoningModel}`,
           choices,
-          default: current,
+          default: reasoningEffort,
         },
       ]);
 
-      config.azure.reasoningEffort = reasoningEffort;
+      config.azure.reasoningEffort = promptResult.reasoningEffort;
       config.azure.reasoningModel = reasoningModel;
       setConfig(config);
+      } else {
+        // Not prompting - ensure config has the default/current value
+        config.azure.reasoningEffort = reasoningEffort;
+        config.azure.reasoningModel = reasoningModel;
+        setConfig(config);
+      }
     }
   }
 
