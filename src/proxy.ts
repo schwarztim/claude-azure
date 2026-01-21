@@ -516,10 +516,16 @@ export function createProxy(config: ProxyConfig): http.Server {
     try {
       const claudeReq = JSON.parse(body);
 
-      // SKIP QUOTA CHECKS - these are Claude Code warmup requests
+      // SKIP QUOTA CHECKS AND TITLE GENERATION - these are Claude Code background tasks
       const firstMessage = claudeReq.messages?.[0];
-      if (firstMessage?.content === 'quota' ||
-          (typeof firstMessage?.content === 'string' && firstMessage.content.includes('quota'))) {
+      const messageContent = typeof firstMessage?.content === 'string'
+        ? firstMessage.content
+        : (Array.isArray(firstMessage?.content)
+            ? firstMessage.content.map((b: any) => (typeof b === 'string' ? b : b.text || '')).join('')
+            : '');
+
+      // Skip quota checks
+      if (firstMessage?.content === 'quota' || messageContent.includes('quota')) {
         console.log('[PROXY] Skipping quota check request (warmup)');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -530,6 +536,22 @@ export function createProxy(config: ProxyConfig): http.Server {
           model: claudeReq.model,
           stop_reason: 'end_turn',
           usage: { input_tokens: 1, output_tokens: 1 },
+        }));
+        return;
+      }
+
+      // Skip conversation title generation (expensive background task)
+      if (messageContent.includes('Please write a 5-10 word title for the following conversation')) {
+        console.log('[PROXY] Skipping title generation request (background task)');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 'skip-' + Date.now(),
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Untitled Conversation' }],
+          model: claudeReq.model,
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 3 },
         }));
         return;
       }
