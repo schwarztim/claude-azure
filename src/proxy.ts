@@ -732,7 +732,11 @@ export function createProxy(config: ProxyConfig): http.Server {
       // Determine if we should use Responses API (when router is configured)
       const useResponsesAPI = shouldUseResponsesAPI(azure);
       const openaiReq = buildOpenAIRequest(claudeReq, azure, useResponsesAPI);
-      // Note: Responses API now supports streaming (SSE) as of 2025
+      // Force non-streaming for Responses API - we simulate streaming from the complete response
+      // (Azure Responses API SSE format differs from Chat Completions, so we handle it differently)
+      if (useResponsesAPI) {
+        openaiReq.stream = false;
+      }
 
       if (verbose) {
         const apiEndpoint = useResponsesAPI
