@@ -713,6 +713,31 @@ export function createProxy(config: ProxyConfig): http.Server {
         return;
       }
 
+      // Skip: Haiku requests when using single-model router
+      // When router is configured, all models go to the same deployment (e.g., gpt-5.2-codex)
+      // Haiku requests are typically quick checks that waste tokens on expensive reasoning models
+      const requestModel = (claudeReq.model || "").toLowerCase();
+      if (azure.router && requestModel.includes("haiku")) {
+        if (verbose) {
+          console.log(
+            `[PROXY] SKIP: haiku request in router mode (model=${claudeReq.model}, router=${azure.router})`,
+          );
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "skip-" + Date.now(),
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "ok" }],
+            model: claudeReq.model,
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        );
+        return;
+      }
+
       // Log details in verbose mode
       if (verbose) {
         console.log(`[PROXY] === Forwarding request ===`);
