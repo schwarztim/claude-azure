@@ -6,7 +6,7 @@
 import http from "http";
 import https from "https";
 import { URL } from "url";
-import { type AzureConfig } from "./config.js";
+import { type AzureConfig, getReasoningEffort } from "./config.js";
 
 interface ProxyConfig {
   port: number;
@@ -360,7 +360,8 @@ function buildOpenAIRequest(
     req.tools = convertTools(claudeReq.tools, useResponsesAPI);
   }
 
-  const reasoningEffort = config.reasoningEffort;
+  // Read reasoning effort dynamically (allows changing without restart)
+  const reasoningEffort = getReasoningEffort() || config.reasoningEffort;
   if (reasoningEffort) {
     const modelName = String(req.model || "").toLowerCase();
     const targetModel = config.reasoningModel?.toLowerCase();
@@ -731,9 +732,7 @@ export function createProxy(config: ProxyConfig): http.Server {
       // Determine if we should use Responses API (when router is configured)
       const useResponsesAPI = shouldUseResponsesAPI(azure);
       const openaiReq = buildOpenAIRequest(claudeReq, azure, useResponsesAPI);
-      if (useResponsesAPI) {
-        openaiReq.stream = false;
-      }
+      // Note: Responses API now supports streaming (SSE) as of 2025
 
       if (verbose) {
         const apiEndpoint = useResponsesAPI
