@@ -3,10 +3,10 @@
  *
  * Ported from the battle-tested Python claude-universal proxy
  */
-import http from 'http';
-import https from 'https';
-import { URL } from 'url';
-import { type AzureConfig } from './config.js';
+import http from "http";
+import https from "https";
+import { URL } from "url";
+import { type AzureConfig } from "./config.js";
 
 interface ProxyConfig {
   port: number;
@@ -20,7 +20,9 @@ function sseEvent(event: string, data: any): string {
 }
 
 function isResponsesApiVersion(apiVersion: string): boolean {
-  return apiVersion.startsWith('2025-04-01') || apiVersion.startsWith('2024-08-01');
+  return (
+    apiVersion.startsWith("2025-04-01") || apiVersion.startsWith("2024-08-01")
+  );
 }
 
 function shouldUseResponsesAPI(config: AzureConfig): boolean {
@@ -28,7 +30,7 @@ function shouldUseResponsesAPI(config: AzureConfig): boolean {
 }
 
 function buildResponsesUrls(azure: AzureConfig, deployment: string): URL[] {
-  const versions = [azure.apiVersion, '2025-04-01-preview'];
+  const versions = [azure.apiVersion, "2025-04-01-preview"];
   const seen = new Set<string>();
   const urls: URL[] = [];
 
@@ -37,10 +39,17 @@ function buildResponsesUrls(azure: AzureConfig, deployment: string): URL[] {
     seen.add(version);
     // For router mode, try non-deployment endpoint first (APIM model router)
     if (azure.router) {
-      urls.push(new URL(`/openai/responses?api-version=${version}`, azure.endpoint));
+      urls.push(
+        new URL(`/openai/responses?api-version=${version}`, azure.endpoint),
+      );
     }
     // Then try deployment-specific endpoint as fallback
-    urls.push(new URL(`/openai/deployments/${deployment}/responses?api-version=${version}`, azure.endpoint));
+    urls.push(
+      new URL(
+        `/openai/deployments/${deployment}/responses?api-version=${version}`,
+        azure.endpoint,
+      ),
+    );
   }
 
   return urls;
@@ -55,9 +64,9 @@ function getDeployment(model: string, config: AzureConfig): string {
 
   // Otherwise, use tiered deployments
   const lower = model.toLowerCase();
-  if (lower.includes('opus')) return config.deployments.opus || 'gpt-4o';
-  if (lower.includes('haiku')) return config.deployments.haiku || 'gpt-4o-mini';
-  return config.deployments.sonnet || 'gpt-4o';
+  if (lower.includes("opus")) return config.deployments.opus || "gpt-4o";
+  if (lower.includes("haiku")) return config.deployments.haiku || "gpt-4o-mini";
+  return config.deployments.sonnet || "gpt-4o";
 }
 
 // Get model name for request body (what the router should select)
@@ -78,8 +87,8 @@ function hasToolUsage(messages: any[]): boolean {
     const content = msg.content;
     if (Array.isArray(content)) {
       for (const block of content) {
-        const blockType = block.type || '';
-        if (blockType === 'tool_use' || blockType === 'tool_result') {
+        const blockType = block.type || "";
+        if (blockType === "tool_use" || blockType === "tool_result") {
           return true;
         }
       }
@@ -89,28 +98,32 @@ function hasToolUsage(messages: any[]): boolean {
 }
 
 // Convert Claude messages to OpenAI format (handles tool_use, tool_result, images)
-function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: boolean = false): any[] {
+function convertMessages(
+  claudeMessages: any[],
+  system?: any,
+  useResponsesAPI: boolean = false,
+): any[] {
   const messages: any[] = [];
 
   // Add system message first (both endpoints support this)
   if (system) {
-    if (typeof system === 'string') {
-      messages.push({ role: 'system', content: system });
+    if (typeof system === "string") {
+      messages.push({ role: "system", content: system });
     } else if (Array.isArray(system)) {
       const text = (system as any[])
-        .filter((b: any) => b.type === 'text')
-        .map((b: any) => b.text || '')
-        .join(' ');
-      messages.push({ role: 'system', content: text });
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text || "")
+        .join(" ");
+      messages.push({ role: "system", content: text });
     }
   }
 
   for (const msg of claudeMessages) {
-    const role = msg.role || 'user';
+    const role = msg.role || "user";
     const content = msg.content;
 
     // Simple string content
-    if (typeof content === 'string') {
+    if (typeof content === "string") {
       messages.push({ role, content });
       continue;
     }
@@ -123,102 +136,130 @@ function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: b
       const toolResultBlocks: any[] = [];
 
       for (const block of content) {
-        const blockType = block.type || '';
+        const blockType = block.type || "";
 
-        if (blockType === 'text') {
+        if (blockType === "text") {
           // Responses API uses different content types than Chat Completions
           const textType = useResponsesAPI
-            ? (role === 'assistant' ? 'output_text' : 'input_text')
-            : 'text';
-          textParts.push({ type: textType, text: block.text || '' });
-        } else if (blockType === 'image') {
+            ? role === "assistant"
+              ? "output_text"
+              : "input_text"
+            : "text";
+          textParts.push({ type: textType, text: block.text || "" });
+        } else if (blockType === "image") {
           const source = block.source || {};
-          if (source.type === 'base64') {
-            const mediaType = source.media_type || 'image/png';
-            const data = source.data || '';
+          if (source.type === "base64") {
+            const mediaType = source.media_type || "image/png";
+            const data = source.data || "";
             // Responses API uses 'input_image' type
-            const imageType = useResponsesAPI ? 'input_image' : 'image_url';
+            const imageType = useResponsesAPI ? "input_image" : "image_url";
             imageParts.push({
               type: imageType,
               image_url: { url: `data:${mediaType};base64,${data}` },
             });
           }
-        } else if (blockType === 'tool_use') {
+        } else if (blockType === "tool_use") {
           toolUseBlocks.push(block);
-        } else if (blockType === 'tool_result') {
+        } else if (blockType === "tool_result") {
           toolResultBlocks.push(block);
         }
       }
 
       // Assistant with tool_use blocks
-      if (role === 'assistant' && toolUseBlocks.length > 0) {
+      if (role === "assistant" && toolUseBlocks.length > 0) {
         // Responses API doesn't support tool_calls - convert to text format
         if (useResponsesAPI) {
           const toolText = toolUseBlocks
-            .map((tb) => `[Tool: ${tb.name}, Input: ${JSON.stringify(tb.input)}]`)
-            .join(' ');
-          const textContent = textParts.map((p) => p.text).join(' ').trim();
-          const combinedContent = [textContent, toolText].filter(Boolean).join(' ') || '';
-          messages.push({ role: 'assistant', content: combinedContent });
+            .map(
+              (tb) => `[Tool: ${tb.name}, Input: ${JSON.stringify(tb.input)}]`,
+            )
+            .join(" ");
+          const textContent = textParts
+            .map((p) => p.text)
+            .join(" ")
+            .trim();
+          const combinedContent =
+            [textContent, toolText].filter(Boolean).join(" ") || "";
+          messages.push({ role: "assistant", content: combinedContent });
         } else {
           // Chat Completions API supports tool_calls
           const toolCalls = toolUseBlocks.map((tb) => ({
-            id: tb.id || '',
-            type: 'function',
+            id: tb.id || "",
+            type: "function",
             function: {
-              name: tb.name || '',
+              name: tb.name || "",
               arguments: JSON.stringify(tb.input || {}),
             },
           }));
-          const textContent = textParts.map((p) => p.text).join(' ').trim();
-          messages.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
+          const textContent = textParts
+            .map((p) => p.text)
+            .join(" ")
+            .trim();
+          messages.push({
+            role: "assistant",
+            content: textContent || null,
+            tool_calls: toolCalls,
+          });
         }
       }
       // User with tool_result blocks
       else if (toolResultBlocks.length > 0) {
         // Responses API doesn't support 'tool' role - convert to user message
         if (useResponsesAPI) {
-          const toolResults = toolResultBlocks.map((result) => {
-            let resultContent = result.content || '';
-            if (Array.isArray(resultContent)) {
-              resultContent = resultContent
-                .map((item: any) => (typeof item === 'string' ? item : item.text || ''))
-                .join('\n');
-            } else if (typeof resultContent !== 'string') {
-              resultContent = JSON.stringify(resultContent);
-            }
-            const isError = result.is_error || false;
-            return `[Tool Result: ${isError ? 'Error: ' : ''}${resultContent}]`;
-          }).join(' ');
+          const toolResults = toolResultBlocks
+            .map((result) => {
+              let resultContent = result.content || "";
+              if (Array.isArray(resultContent)) {
+                resultContent = resultContent
+                  .map((item: any) =>
+                    typeof item === "string" ? item : item.text || "",
+                  )
+                  .join("\n");
+              } else if (typeof resultContent !== "string") {
+                resultContent = JSON.stringify(resultContent);
+              }
+              const isError = result.is_error || false;
+              return `[Tool Result: ${isError ? "Error: " : ""}${resultContent}]`;
+            })
+            .join(" ");
 
-          const textContent = textParts.map((p) => p.text).join(' ').trim();
-          const combinedContent = [textContent, toolResults].filter(Boolean).join(' ') || '';
-          messages.push({ role: 'user', content: combinedContent });
+          const textContent = textParts
+            .map((p) => p.text)
+            .join(" ")
+            .trim();
+          const combinedContent =
+            [textContent, toolResults].filter(Boolean).join(" ") || "";
+          messages.push({ role: "user", content: combinedContent });
         } else {
           // Chat Completions API supports 'tool' role
           for (const result of toolResultBlocks) {
-            let resultContent = result.content || '';
+            let resultContent = result.content || "";
             if (Array.isArray(resultContent)) {
               resultContent = resultContent
-                .map((item: any) => (typeof item === 'string' ? item : item.text || ''))
-                .join('\n');
-            } else if (typeof resultContent !== 'string') {
+                .map((item: any) =>
+                  typeof item === "string" ? item : item.text || "",
+                )
+                .join("\n");
+            } else if (typeof resultContent !== "string") {
               resultContent = JSON.stringify(resultContent);
             }
 
             const isError = result.is_error || false;
             messages.push({
-              role: 'tool',
-              tool_call_id: result.tool_use_id || '',
+              role: "tool",
+              tool_call_id: result.tool_use_id || "",
               content: isError ? `Error: ${resultContent}` : resultContent,
             });
           }
 
           // Also include any text content
           if (textParts.length > 0) {
-            const combinedText = textParts.map((p) => p.text).join(' ').trim();
+            const combinedText = textParts
+              .map((p) => p.text)
+              .join(" ")
+              .trim();
             if (combinedText) {
-              messages.push({ role: 'user', content: combinedText });
+              messages.push({ role: "user", content: combinedText });
             }
           }
         }
@@ -226,9 +267,9 @@ function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: b
       // Regular content (text and images)
       else if (textParts.length > 0 || imageParts.length > 0) {
         const combined = [...textParts, ...imageParts];
-        if (combined.length === 1 && combined[0].type === 'text') {
+        if (combined.length === 1 && combined[0].type === "text") {
           // Ensure we don't send null content - use empty string as fallback
-          messages.push({ role, content: combined[0].text || '' });
+          messages.push({ role, content: combined[0].text || "" });
         } else {
           messages.push({ role, content: combined });
         }
@@ -240,27 +281,31 @@ function convertMessages(claudeMessages: any[], system?: any, useResponsesAPI: b
 }
 
 // Convert Claude tools to OpenAI/Azure function format
-function convertTools(claudeTools: any[], useResponsesAPI: boolean = false): any[] {
+function convertTools(
+  claudeTools: any[],
+  useResponsesAPI: boolean = false,
+): any[] {
   return claudeTools.map((tool) => {
     // If already in OpenAI format, return as-is for Chat Completions
-    if (tool.type === 'function' && !useResponsesAPI) return tool;
+    if (tool.type === "function" && !useResponsesAPI) return tool;
 
     if (useResponsesAPI) {
       // Responses API uses a flatter structure with name/description/parameters at root
       return {
-        type: 'function',
-        name: tool.name || tool.function?.name || '',
-        description: tool.description || tool.function?.description || '',
-        parameters: tool.input_schema || tool.function?.parameters || { type: 'object', properties: {} },
+        type: "function",
+        name: tool.name || tool.function?.name || "",
+        description: tool.description || tool.function?.description || "",
+        parameters: tool.input_schema ||
+          tool.function?.parameters || { type: "object", properties: {} },
       };
     } else {
       // Chat Completions API nests name/description/parameters inside function
       return {
-        type: 'function',
+        type: "function",
         function: {
-          name: tool.name || '',
-          description: tool.description || '',
-          parameters: tool.input_schema || { type: 'object', properties: {} },
+          name: tool.name || "",
+          description: tool.description || "",
+          parameters: tool.input_schema || { type: "object", properties: {} },
         },
       };
     }
@@ -268,22 +313,30 @@ function convertTools(claudeTools: any[], useResponsesAPI: boolean = false): any
 }
 
 // Build OpenAI request from Claude request
-function buildOpenAIRequest(claudeReq: any, config: AzureConfig, useResponsesAPI: boolean = false): any {
+function buildOpenAIRequest(
+  claudeReq: any,
+  config: AzureConfig,
+  useResponsesAPI: boolean = false,
+): any {
   const maxTokens = claudeReq.max_tokens || 64000;
-  let messages = convertMessages(claudeReq.messages || [], claudeReq.system, useResponsesAPI);
+  let messages = convertMessages(
+    claudeReq.messages || [],
+    claudeReq.system,
+    useResponsesAPI,
+  );
 
   // For Responses API, ensure no null content (must be string or array, use empty string as fallback)
   if (useResponsesAPI) {
     messages = messages.map((msg: any) => {
       if (msg.content === null || msg.content === undefined) {
-        return { ...msg, content: '' };
+        return { ...msg, content: "" };
       }
       return msg;
     });
   }
 
   const req: any = {
-    model: getModelName(claudeReq.model || '', config),
+    model: getModelName(claudeReq.model || "", config),
     stream: claudeReq.stream || false,
   };
 
@@ -309,11 +362,11 @@ function buildOpenAIRequest(claudeReq: any, config: AzureConfig, useResponsesAPI
 
   const reasoningEffort = config.reasoningEffort;
   if (reasoningEffort) {
-    const modelName = String(req.model || '').toLowerCase();
+    const modelName = String(req.model || "").toLowerCase();
     const targetModel = config.reasoningModel?.toLowerCase();
     const shouldApplyReasoning =
       (targetModel && (modelName === targetModel || !!config.router)) ||
-      (!targetModel && modelName.includes('gpt-5'));
+      (!targetModel && modelName.includes("gpt-5"));
     if (shouldApplyReasoning) {
       if (useResponsesAPI) {
         req.reasoning = { effort: reasoningEffort };
@@ -327,7 +380,11 @@ function buildOpenAIRequest(claudeReq: any, config: AzureConfig, useResponsesAPI
 }
 
 // Convert OpenAI/Azure response to Claude format
-function convertResponse(openaiRes: any, model: string, _useResponsesAPI: boolean = false): any {
+function convertResponse(
+  openaiRes: any,
+  model: string,
+  _useResponsesAPI: boolean = false,
+): any {
   const content: any[] = [];
 
   if (openaiRes.choices?.length) {
@@ -335,45 +392,49 @@ function convertResponse(openaiRes: any, model: string, _useResponsesAPI: boolea
     const message = choice.message || {};
 
     if (message.content) {
-      content.push({ type: 'text', text: message.content });
+      content.push({ type: "text", text: message.content });
     }
 
     if (message.tool_calls) {
       for (const tc of message.tool_calls) {
         let input = {};
         try {
-          input = JSON.parse(tc.function?.arguments || '{}');
+          input = JSON.parse(tc.function?.arguments || "{}");
         } catch {
           input = {};
         }
         content.push({
-          type: 'tool_use',
-          id: tc.id || '',
-          name: tc.function?.name || '',
+          type: "tool_use",
+          id: tc.id || "",
+          name: tc.function?.name || "",
           input,
         });
       }
     }
 
-    const finishReason = choice.finish_reason || 'stop';
+    const finishReason = choice.finish_reason || "stop";
     const stopReasonMap: Record<string, string> = {
-      stop: 'end_turn',
-      length: 'max_tokens',
-      tool_calls: 'tool_use',
-      content_filter: 'end_turn',
+      stop: "end_turn",
+      length: "max_tokens",
+      tool_calls: "tool_use",
+      content_filter: "end_turn",
     };
 
     return {
       id: openaiRes.id || `msg_${Date.now()}`,
-      type: 'message',
-      role: 'assistant',
+      type: "message",
+      role: "assistant",
       content,
       model,
-      stop_reason: stopReasonMap[finishReason] || 'end_turn',
+      stop_reason: stopReasonMap[finishReason] || "end_turn",
       stop_sequence: null,
       usage: {
-        input_tokens: openaiRes.usage?.prompt_tokens || openaiRes.usage?.input_tokens || 0,
-        output_tokens: openaiRes.usage?.completion_tokens || openaiRes.usage?.output_tokens || 0,
+        input_tokens:
+          openaiRes.usage?.prompt_tokens || openaiRes.usage?.input_tokens || 0,
+        output_tokens:
+          openaiRes.usage?.completion_tokens ||
+          openaiRes.usage?.output_tokens ||
+          0,
       },
     };
   }
@@ -383,51 +444,55 @@ function convertResponse(openaiRes: any, model: string, _useResponsesAPI: boolea
 
   const pushToolUse = (id: string, name: string, args: any) => {
     let input = {};
-    if (typeof args === 'string') {
+    if (typeof args === "string") {
       try {
         input = JSON.parse(args);
       } catch {
         input = {};
       }
-    } else if (args && typeof args === 'object') {
+    } else if (args && typeof args === "object") {
       input = args;
     }
-    toolUses.push({ type: 'tool_use', id: id || '', name: name || '', input });
+    toolUses.push({ type: "tool_use", id: id || "", name: name || "", input });
   };
 
   const extractToolCall = (item: any) => {
     if (!item) return null;
-    if (item.type === 'tool_call' || item.type === 'function_call') {
+    if (item.type === "tool_call" || item.type === "function_call") {
       return {
-        id: item.id || '',
-        name: item.name || item.tool_name || item.function?.name || '',
-        args: item.arguments || item.tool_arguments || item.function?.arguments || '{}',
+        id: item.id || "",
+        name: item.name || item.tool_name || item.function?.name || "",
+        args:
+          item.arguments ||
+          item.tool_arguments ||
+          item.function?.arguments ||
+          "{}",
       };
     }
-    if (item.type === 'tool' && item.name) {
+    if (item.type === "tool" && item.name) {
       return {
-        id: item.id || '',
-        name: item.name || '',
-        args: item.arguments || item.input || '{}',
+        id: item.id || "",
+        name: item.name || "",
+        args: item.arguments || item.input || "{}",
       };
     }
     return null;
   };
 
-  if (typeof openaiRes.output_text === 'string') {
+  if (typeof openaiRes.output_text === "string") {
     textParts.push(openaiRes.output_text);
   }
 
   if (Array.isArray(openaiRes.output)) {
     for (const item of openaiRes.output) {
-      if (item?.type === 'message') {
+      if (item?.type === "message") {
         const itemContent = item.content;
-        if (typeof itemContent === 'string') {
+        if (typeof itemContent === "string") {
           textParts.push(itemContent);
         } else if (Array.isArray(itemContent)) {
           for (const block of itemContent) {
-            if (block?.type === 'output_text' || block?.type === 'text') {
-              textParts.push(block.text || '');
+            if (block?.type === "output_text" || block?.type === "text") {
+              textParts.push(block.text || "");
             }
             const toolCall = extractToolCall(block);
             if (toolCall) {
@@ -445,7 +510,7 @@ function convertResponse(openaiRes: any, model: string, _useResponsesAPI: boolea
   }
 
   if (textParts.length > 0) {
-    content.push({ type: 'text', text: textParts.join('') });
+    content.push({ type: "text", text: textParts.join("") });
   }
   if (toolUses.length > 0) {
     content.push(...toolUses);
@@ -457,11 +522,11 @@ function convertResponse(openaiRes: any, model: string, _useResponsesAPI: boolea
 
   return {
     id: openaiRes.id || `msg_${Date.now()}`,
-    type: 'message',
-    role: 'assistant',
+    type: "message",
+    role: "assistant",
     content,
     model,
-    stop_reason: 'end_turn',
+    stop_reason: "end_turn",
     stop_sequence: null,
     usage: {
       input_tokens: inputTokens,
@@ -475,40 +540,44 @@ export function createProxy(config: ProxyConfig): http.Server {
 
   const server = http.createServer(async (req, res) => {
     // CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
 
-    if (req.method === 'OPTIONS') {
+    if (req.method === "OPTIONS") {
       res.writeHead(204);
       res.end();
       return;
     }
 
     // Health check
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', provider: 'azure' }));
+    if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", provider: "azure" }));
       return;
     }
 
     // Auth/telemetry endpoints - return success
-    if (req.url?.includes('auth') || req.url?.includes('token') ||
-        req.url?.includes('telemetry') || req.url?.includes('event_logging')) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok' }));
+    if (
+      req.url?.includes("auth") ||
+      req.url?.includes("token") ||
+      req.url?.includes("telemetry") ||
+      req.url?.includes("event_logging")
+    ) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok" }));
       return;
     }
 
     // Only handle POST to /v1/messages
-    if (req.method !== 'POST' || !req.url?.includes('/messages')) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
+    if (req.method !== "POST" || !req.url?.includes("/messages")) {
+      res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: `Not found: ${req.url}` }));
       return;
     }
 
     // Read body
-    let body = '';
+    let body = "";
     for await (const chunk of req) {
       body += chunk;
     }
@@ -516,45 +585,146 @@ export function createProxy(config: ProxyConfig): http.Server {
     try {
       const claudeReq = JSON.parse(body);
 
-      // SKIP QUOTA CHECKS AND TITLE GENERATION - these are Claude Code background tasks
+      // Extract message content for filtering
       const firstMessage = claudeReq.messages?.[0];
-      const messageContent = typeof firstMessage?.content === 'string'
-        ? firstMessage.content
-        : (Array.isArray(firstMessage?.content)
-            ? firstMessage.content.map((b: any) => (typeof b === 'string' ? b : b.text || '')).join('')
-            : '');
+      const messageContent =
+        typeof firstMessage?.content === "string"
+          ? firstMessage.content
+          : Array.isArray(firstMessage?.content)
+            ? firstMessage.content
+                .map((b: any) => (typeof b === "string" ? b : b.text || ""))
+                .join("")
+            : "";
 
-      // Skip quota checks (silent - no logging unless verbose)
-      if (firstMessage?.content === 'quota' || messageContent.includes('quota')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          id: 'skip-' + Date.now(),
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'text', text: 'ok' }],
-          model: claudeReq.model,
-          stop_reason: 'end_turn',
-          usage: { input_tokens: 1, output_tokens: 1 },
-        }));
+      // SKIP CLAUDE CODE WARMUP/BACKGROUND REQUESTS
+      // These are internal requests that don't need to hit the API
+      const maxTokens = claudeReq.max_tokens || 0;
+      const messageCount = claudeReq.messages?.length || 0;
+
+      // Skip: Very small max_tokens requests (warmup/model checks)
+      // Claude Code sends requests with max_tokens=1 or max_tokens=10 to check availability
+      if (maxTokens <= 10) {
+        if (verbose) {
+          console.log(`[PROXY] SKIP: warmup request (max_tokens=${maxTokens})`);
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "skip-" + Date.now(),
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "ok" }],
+            model: claudeReq.model,
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        );
         return;
       }
 
-      // Skip conversation title generation (silent - no logging unless verbose)
-      if (messageContent.includes('Please write a 5-10 word title for the following conversation')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          id: 'skip-' + Date.now(),
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'text', text: 'Untitled Conversation' }],
-          model: claudeReq.model,
-          stop_reason: 'end_turn',
-          usage: { input_tokens: 1, output_tokens: 3 },
-        }));
+      // Skip: Empty message requests
+      if (messageCount === 0 || !messageContent.trim()) {
+        if (verbose) {
+          console.log(`[PROXY] SKIP: empty message request`);
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "skip-" + Date.now(),
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            model: claudeReq.model,
+            stop_reason: "end_turn",
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }),
+        );
         return;
       }
 
-      const originalModel = claudeReq.model || '';
+      // Skip: Quota check requests
+      if (
+        firstMessage?.content === "quota" ||
+        messageContent.includes("quota")
+      ) {
+        if (verbose) {
+          console.log(`[PROXY] SKIP: quota check request`);
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "skip-" + Date.now(),
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "ok" }],
+            model: claudeReq.model,
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        );
+        return;
+      }
+
+      // Skip: Title generation requests
+      if (
+        messageContent.includes(
+          "Please write a 5-10 word title for the following conversation",
+        )
+      ) {
+        if (verbose) {
+          console.log(`[PROXY] SKIP: title generation request`);
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "skip-" + Date.now(),
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "Untitled Conversation" }],
+            model: claudeReq.model,
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 3 },
+          }),
+        );
+        return;
+      }
+
+      // Skip: Low-token hook/startup requests (max_tokens <= 1000 with system-reminder content)
+      // These are Claude Code internal checks that don't need real API calls
+      if (maxTokens <= 1000 && messageContent.includes("<system-reminder>")) {
+        if (verbose) {
+          console.log(
+            `[PROXY] SKIP: hook/startup request (max_tokens=${maxTokens}, has system-reminder)`,
+          );
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "skip-" + Date.now(),
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "ok" }],
+            model: claudeReq.model,
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        );
+        return;
+      }
+
+      // Log details in verbose mode
+      if (verbose) {
+        console.log(`[PROXY] === Forwarding request ===`);
+        console.log(`[PROXY] Model: ${claudeReq.model}`);
+        console.log(`[PROXY] Stream: ${claudeReq.stream}`);
+        console.log(`[PROXY] Message count: ${messageCount}`);
+        console.log(`[PROXY] Max tokens: ${maxTokens}`);
+        console.log(
+          `[PROXY] First message preview: ${JSON.stringify(firstMessage)?.substring(0, 300)}`,
+        );
+      }
+
+      const originalModel = claudeReq.model || "";
       const deployment = getDeployment(originalModel, azure);
       const wantsStream = !!claudeReq.stream;
 
@@ -566,23 +736,37 @@ export function createProxy(config: ProxyConfig): http.Server {
       }
 
       if (verbose) {
-        const apiEndpoint = useResponsesAPI ? 'responses' : `deployments/${deployment}/chat/completions`;
+        const apiEndpoint = useResponsesAPI
+          ? "responses"
+          : `deployments/${deployment}/chat/completions`;
         const maxTokens =
-          openaiReq.max_completion_tokens ?? openaiReq.max_output_tokens ?? openaiReq.max_tokens ?? 'unknown';
-        console.log(`[PROXY] ${originalModel} -> ${deployment} @ ${azure.endpoint}/openai/${apiEndpoint}?api-version=${azure.apiVersion} (max_tokens=${maxTokens})`);
-        console.log(`[PROXY] Sending ${useResponsesAPI ? '/responses endpoint' : 'Chat Completions'} request to Azure...`);
+          openaiReq.max_completion_tokens ??
+          openaiReq.max_output_tokens ??
+          openaiReq.max_tokens ??
+          "unknown";
+        console.log(
+          `[PROXY] ${originalModel} -> ${deployment} @ ${azure.endpoint}/openai/${apiEndpoint}?api-version=${azure.apiVersion} (max_tokens=${maxTokens})`,
+        );
+        console.log(
+          `[PROXY] Sending ${useResponsesAPI ? "/responses endpoint" : "Chat Completions"} request to Azure...`,
+        );
 
         // Show full messages if tool-like content detected
         const messages = openaiReq.input || openaiReq.messages || [];
-        const hasToolContent = messages.some((msg: any) =>
-          typeof msg.content === 'string' && (msg.content.includes('[Tool:') || msg.content.includes('[Tool Result:'))
+        const hasToolContent = messages.some(
+          (msg: any) =>
+            typeof msg.content === "string" &&
+            (msg.content.includes("[Tool:") ||
+              msg.content.includes("[Tool Result:")),
         );
 
         if (hasToolContent) {
           console.log(`[PROXY] Tool usage detected - full payload:`);
           console.log(JSON.stringify(openaiReq, null, 2));
         } else {
-          console.log(`[PROXY] Request payload: ${JSON.stringify(openaiReq).substring(0, 200)}...`);
+          console.log(
+            `[PROXY] Request payload: ${JSON.stringify(openaiReq).substring(0, 200)}...`,
+          );
         }
       }
 
@@ -591,7 +775,7 @@ export function createProxy(config: ProxyConfig): http.Server {
         : [
             new URL(
               `/openai/deployments/${deployment}/chat/completions?api-version=${azure.apiVersion}`,
-              azure.endpoint
+              azure.endpoint,
             ),
           ];
 
@@ -602,35 +786,60 @@ export function createProxy(config: ProxyConfig): http.Server {
         azureUrls.push(
           new URL(
             `/openai/deployments/${deployment}/chat/completions?api-version=${azure.apiVersion}`,
-            azure.endpoint
-          )
+            azure.endpoint,
+          ),
         );
       }
 
-      const reqOptionsList: https.RequestOptions[] = azureUrls.map((azureUrl) => ({
-        hostname: azureUrl.hostname,
-        port: 443,
-        path: azureUrl.pathname + azureUrl.search,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'api-key': azure.apiKey,
-        },
-      }));
+      const reqOptionsList: https.RequestOptions[] = azureUrls.map(
+        (azureUrl) => ({
+          hostname: azureUrl.hostname,
+          port: 443,
+          path: azureUrl.pathname + azureUrl.search,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "api-key": azure.apiKey,
+          },
+        }),
+      );
 
       if (wantsStream) {
         if (useResponsesAPI) {
-          await handleStreamingFromNonStreaming(res, reqOptionsList, openaiReq, originalModel, verbose, useResponsesAPI);
+          await handleStreamingFromNonStreaming(
+            res,
+            reqOptionsList,
+            openaiReq,
+            originalModel,
+            verbose,
+            useResponsesAPI,
+          );
         } else {
-          await handleStreaming(res, reqOptionsList[0], openaiReq, originalModel, verbose, useResponsesAPI);
+          await handleStreaming(
+            res,
+            reqOptionsList[0],
+            openaiReq,
+            originalModel,
+            verbose,
+            useResponsesAPI,
+          );
         }
       } else {
-        await handleNonStreaming(res, reqOptionsList, openaiReq, originalModel, verbose, useResponsesAPI);
+        await handleNonStreaming(
+          res,
+          reqOptionsList,
+          openaiReq,
+          originalModel,
+          verbose,
+          useResponsesAPI,
+        );
       }
     } catch (error: any) {
-      console.error('[PROXY] Error:', error.message);
+      if (verbose) {
+        console.error("[PROXY] Error:", error.message);
+      }
       if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.writeHead(500, { "Content-Type": "application/json" });
       }
       if (!res.writableEnded) {
         res.end(JSON.stringify({ error: { message: error.message } }));
@@ -642,22 +851,27 @@ export function createProxy(config: ProxyConfig): http.Server {
 }
 
 function formatRequestTarget(options: https.RequestOptions): string {
-  const host = options.hostname || 'unknown-host';
-  const path = options.path || '';
+  const host = options.hostname || "unknown-host";
+  const path = options.path || "";
   return `https://${host}${path}`;
 }
 
-function requestJson(options: https.RequestOptions, payload: any): Promise<{ statusCode: number; body: string }> {
+function requestJson(
+  options: https.RequestOptions,
+  payload: any,
+): Promise<{ statusCode: number; body: string }> {
   return new Promise((resolve, reject) => {
     const azureReq = https.request(options, (azureRes) => {
-      let body = '';
-      azureRes.on('data', (chunk) => { body += chunk; });
-      azureRes.on('end', () => {
+      let body = "";
+      azureRes.on("data", (chunk) => {
+        body += chunk;
+      });
+      azureRes.on("end", () => {
         resolve({ statusCode: azureRes.statusCode || 0, body });
       });
     });
 
-    azureReq.on('error', (err) => {
+    azureReq.on("error", (err) => {
       reject(err);
     });
 
@@ -669,8 +883,12 @@ function requestJson(options: https.RequestOptions, payload: any): Promise<{ sta
 async function requestWithFallback(
   optionsList: https.RequestOptions[],
   payload: any,
-  verbose: boolean
-): Promise<{ statusCode: number; body: string; options: https.RequestOptions }> {
+  verbose: boolean,
+): Promise<{
+  statusCode: number;
+  body: string;
+  options: https.RequestOptions;
+}> {
   let lastError: Error | null = null;
 
   for (let i = 0; i < optionsList.length; i++) {
@@ -678,7 +896,7 @@ async function requestWithFallback(
 
     // Adapt payload based on endpoint type
     let currentPayload = payload;
-    if (options.path?.includes('/chat/completions') && payload.input) {
+    if (options.path?.includes("/chat/completions") && payload.input) {
       // Convert Responses API format to Chat Completions format
       currentPayload = { ...payload };
       currentPayload.messages = payload.input;
@@ -690,7 +908,9 @@ async function requestWithFallback(
     }
 
     if (verbose) {
-      console.log(`[PROXY] Trying endpoint ${i + 1}/${optionsList.length}: ${formatRequestTarget(options)}`);
+      console.log(
+        `[PROXY] Trying endpoint ${i + 1}/${optionsList.length}: ${formatRequestTarget(options)}`,
+      );
     }
 
     try {
@@ -698,18 +918,25 @@ async function requestWithFallback(
       // Only retry on 404 (endpoint not found), not 400 (bad request)
       if (result.statusCode === 404 && i < optionsList.length - 1) {
         if (verbose) {
-          console.log(`[PROXY] Azure 404 from ${formatRequestTarget(options)}; retrying...`);
+          console.log(
+            `[PROXY] Azure 404 from ${formatRequestTarget(options)}; retrying...`,
+          );
         }
         continue;
       }
       // Log error responses with full detail for debugging
       if (result.statusCode !== 200 && verbose) {
-        console.log(`[PROXY] Azure error ${result.statusCode} from ${formatRequestTarget(options)}`);
+        console.log(
+          `[PROXY] Azure error ${result.statusCode} from ${formatRequestTarget(options)}`,
+        );
         // For 400/429 errors, log full body to understand what Azure is rejecting
         if (result.statusCode === 400 || result.statusCode === 429) {
           try {
             const errorBody = JSON.parse(result.body);
-            console.log(`[PROXY] Error detail:`, JSON.stringify(errorBody, null, 2));
+            console.log(
+              `[PROXY] Error detail:`,
+              JSON.stringify(errorBody, null, 2),
+            );
           } catch {
             console.log(`[PROXY] Error detail: ${result.body}`);
           }
@@ -718,14 +945,18 @@ async function requestWithFallback(
         }
       }
       if (verbose && result.statusCode === 200) {
-        console.log(`[PROXY] Success with endpoint: ${formatRequestTarget(options)}`);
+        console.log(
+          `[PROXY] Success with endpoint: ${formatRequestTarget(options)}`,
+        );
       }
       return { ...result, options };
     } catch (err: any) {
       lastError = err;
       if (i < optionsList.length - 1) {
         if (verbose) {
-          console.log(`[PROXY] Azure request error from ${formatRequestTarget(options)}: ${err.message}; retrying...`);
+          console.log(
+            `[PROXY] Azure request error from ${formatRequestTarget(options)}: ${err.message}; retrying...`,
+          );
         }
         continue;
       }
@@ -733,7 +964,7 @@ async function requestWithFallback(
     }
   }
 
-  throw lastError || new Error('Azure request failed');
+  throw lastError || new Error("Azure request failed");
 }
 
 async function handleStreaming(
@@ -742,80 +973,105 @@ async function handleStreaming(
   openaiReq: any,
   model: string,
   verbose: boolean,
-  useResponsesAPI: boolean = false
+  useResponsesAPI: boolean = false,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
     });
 
     const msgId = `msg_${Date.now()}`;
     let outputTokens = 0;
-    let finishReason = 'end_turn';
+    let finishReason = "end_turn";
 
     // Send message_start
-    res.write(sseEvent('message_start', {
-      type: 'message_start',
-      message: {
-        id: msgId,
-        type: 'message',
-        role: 'assistant',
-        content: [],
-        model,
-        stop_reason: null,
-        stop_sequence: null,
-        usage: { input_tokens: 0, output_tokens: 0 },
-      },
-    }));
+    res.write(
+      sseEvent("message_start", {
+        type: "message_start",
+        message: {
+          id: msgId,
+          type: "message",
+          role: "assistant",
+          content: [],
+          model,
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    );
 
     const azureReq = https.request(options, (azureRes) => {
       // Check for error status
       if (azureRes.statusCode !== 200) {
-        let errorBody = '';
-        azureRes.on('data', (chunk) => { errorBody += chunk; });
-        azureRes.on('end', () => {
-          console.error(`[PROXY] Azure error ${azureRes.statusCode}: ${errorBody}`);
+        let errorBody = "";
+        azureRes.on("data", (chunk) => {
+          errorBody += chunk;
+        });
+        azureRes.on("end", () => {
+          if (verbose) {
+            console.error(
+              `[PROXY] Azure error ${azureRes.statusCode}: ${errorBody}`,
+            );
+          }
           // Send error as text block
-          res.write(sseEvent('content_block_start', {
-            type: 'content_block_start',
-            index: 0,
-            content_block: { type: 'text', text: '' },
-          }));
-          res.write(sseEvent('content_block_delta', {
-            type: 'content_block_delta',
-            index: 0,
-            delta: { type: 'text_delta', text: `Error from Azure: ${errorBody}` },
-          }));
-          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }));
-          res.write(sseEvent('message_delta', {
-            type: 'message_delta',
-            delta: { stop_reason: 'end_turn', stop_sequence: null },
-            usage: { output_tokens: 0 },
-          }));
-          res.write(sseEvent('message_stop', { type: 'message_stop' }));
+          res.write(
+            sseEvent("content_block_start", {
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "text", text: "" },
+            }),
+          );
+          res.write(
+            sseEvent("content_block_delta", {
+              type: "content_block_delta",
+              index: 0,
+              delta: {
+                type: "text_delta",
+                text: `Error from Azure: ${errorBody}`,
+              },
+            }),
+          );
+          res.write(
+            sseEvent("content_block_stop", {
+              type: "content_block_stop",
+              index: 0,
+            }),
+          );
+          res.write(
+            sseEvent("message_delta", {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn", stop_sequence: null },
+              usage: { output_tokens: 0 },
+            }),
+          );
+          res.write(sseEvent("message_stop", { type: "message_stop" }));
           res.end();
           resolve();
         });
         return;
       }
 
-      let buffer = '';
+      let buffer = "";
       let textBlockStarted = false;
       let currentBlockIndex = 0;
-      const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+      const toolCalls = new Map<
+        number,
+        { id: string; name: string; arguments: string }
+      >();
       const toolBlocksStarted = new Set<number>();
 
-      azureRes.on('data', (chunk: Buffer) => {
+      azureRes.on("data", (chunk: Buffer) => {
         buffer += chunk.toString();
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
+          if (!line.startsWith("data: ")) continue;
           const dataStr = line.slice(6).trim();
-          if (dataStr === '[DONE]') continue;
+          if (dataStr === "[DONE]") continue;
 
           try {
             const data = JSON.parse(dataStr);
@@ -827,35 +1083,49 @@ async function handleStreaming(
 
             // Handle finish reason
             if (choice.finish_reason) {
-              if (choice.finish_reason === 'tool_calls') finishReason = 'tool_use';
-              else if (choice.finish_reason === 'length') finishReason = 'max_tokens';
-              else finishReason = 'end_turn';
+              if (choice.finish_reason === "tool_calls")
+                finishReason = "tool_use";
+              else if (choice.finish_reason === "length")
+                finishReason = "max_tokens";
+              else finishReason = "end_turn";
             }
 
             // Handle text content
             if (delta.content) {
               if (!textBlockStarted) {
-                res.write(sseEvent('content_block_start', {
-                  type: 'content_block_start',
-                  index: currentBlockIndex,
-                  content_block: { type: 'text', text: '' },
-                }));
+                res.write(
+                  sseEvent("content_block_start", {
+                    type: "content_block_start",
+                    index: currentBlockIndex,
+                    content_block: { type: "text", text: "" },
+                  }),
+                );
                 textBlockStarted = true;
               }
-              res.write(sseEvent('content_block_delta', {
-                type: 'content_block_delta',
-                index: currentBlockIndex,
-                delta: { type: 'text_delta', text: delta.content },
-              }));
+              res.write(
+                sseEvent("content_block_delta", {
+                  type: "content_block_delta",
+                  index: currentBlockIndex,
+                  delta: { type: "text_delta", text: delta.content },
+                }),
+              );
             }
 
             // Handle tool calls
             if (delta.tool_calls) {
-              if (verbose) console.log(`[PROXY] Tool call delta: ${JSON.stringify(delta.tool_calls)}`);
+              if (verbose)
+                console.log(
+                  `[PROXY] Tool call delta: ${JSON.stringify(delta.tool_calls)}`,
+                );
 
               // Close text block if open
               if (textBlockStarted && !toolBlocksStarted.size) {
-                res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: currentBlockIndex }));
+                res.write(
+                  sseEvent("content_block_stop", {
+                    type: "content_block_stop",
+                    index: currentBlockIndex,
+                  }),
+                );
                 currentBlockIndex++;
                 textBlockStarted = false;
               }
@@ -865,36 +1135,51 @@ async function handleStreaming(
                 const blockIndex = currentBlockIndex + tcIndex;
 
                 if (!toolCalls.has(tcIndex)) {
-                  toolCalls.set(tcIndex, { id: tc.id || '', name: '', arguments: '' });
+                  toolCalls.set(tcIndex, {
+                    id: tc.id || "",
+                    name: "",
+                    arguments: "",
+                  });
                 }
 
                 const toolCall = toolCalls.get(tcIndex)!;
                 if (tc.id) toolCall.id = tc.id;
                 if (tc.function?.name) toolCall.name = tc.function.name;
-                if (tc.function?.arguments) toolCall.arguments += tc.function.arguments;
+                if (tc.function?.arguments)
+                  toolCall.arguments += tc.function.arguments;
 
                 // Start tool block
                 if (!toolBlocksStarted.has(blockIndex) && toolCall.name) {
-                  res.write(sseEvent('content_block_start', {
-                    type: 'content_block_start',
-                    index: blockIndex,
-                    content_block: {
-                      type: 'tool_use',
-                      id: toolCall.id,
-                      name: toolCall.name,
-                      input: {},
-                    },
-                  }));
+                  res.write(
+                    sseEvent("content_block_start", {
+                      type: "content_block_start",
+                      index: blockIndex,
+                      content_block: {
+                        type: "tool_use",
+                        id: toolCall.id,
+                        name: toolCall.name,
+                        input: {},
+                      },
+                    }),
+                  );
                   toolBlocksStarted.add(blockIndex);
                 }
 
                 // Send argument delta
-                if (tc.function?.arguments && toolBlocksStarted.has(blockIndex)) {
-                  res.write(sseEvent('content_block_delta', {
-                    type: 'content_block_delta',
-                    index: blockIndex,
-                    delta: { type: 'input_json_delta', partial_json: tc.function.arguments },
-                  }));
+                if (
+                  tc.function?.arguments &&
+                  toolBlocksStarted.has(blockIndex)
+                ) {
+                  res.write(
+                    sseEvent("content_block_delta", {
+                      type: "content_block_delta",
+                      index: blockIndex,
+                      delta: {
+                        type: "input_json_delta",
+                        partial_json: tc.function.arguments,
+                      },
+                    }),
+                  );
                 }
               }
             }
@@ -909,47 +1194,70 @@ async function handleStreaming(
         }
       });
 
-      azureRes.on('end', () => {
+      azureRes.on("end", () => {
         // Close text block
         if (textBlockStarted && !toolBlocksStarted.has(currentBlockIndex)) {
-          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: currentBlockIndex }));
+          res.write(
+            sseEvent("content_block_stop", {
+              type: "content_block_stop",
+              index: currentBlockIndex,
+            }),
+          );
         }
 
         // Close tool blocks
         for (const idx of toolBlocksStarted) {
-          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: idx }));
+          res.write(
+            sseEvent("content_block_stop", {
+              type: "content_block_stop",
+              index: idx,
+            }),
+          );
         }
 
         // If nothing was started, send empty text block
         if (!textBlockStarted && !toolBlocksStarted.size) {
-          res.write(sseEvent('content_block_start', {
-            type: 'content_block_start',
-            index: 0,
-            content_block: { type: 'text', text: '' },
-          }));
-          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }));
+          res.write(
+            sseEvent("content_block_start", {
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "text", text: "" },
+            }),
+          );
+          res.write(
+            sseEvent("content_block_stop", {
+              type: "content_block_stop",
+              index: 0,
+            }),
+          );
         }
 
         // Send message_delta and message_stop
-        res.write(sseEvent('message_delta', {
-          type: 'message_delta',
-          delta: { stop_reason: finishReason, stop_sequence: null },
-          usage: { output_tokens: outputTokens },
-        }));
-        res.write(sseEvent('message_stop', { type: 'message_stop' }));
+        res.write(
+          sseEvent("message_delta", {
+            type: "message_delta",
+            delta: { stop_reason: finishReason, stop_sequence: null },
+            usage: { output_tokens: outputTokens },
+          }),
+        );
+        res.write(sseEvent("message_stop", { type: "message_stop" }));
         res.end();
         resolve();
       });
 
-      azureRes.on('error', (err) => {
-        console.error('[PROXY] Azure stream error:', err);
+      azureRes.on("error", (err) => {
+        if (verbose) {
+          console.error("[PROXY] Azure stream error:", err);
+        }
         res.end();
         reject(err);
       });
     });
 
-    azureReq.on('error', (err) => {
-      console.error('[PROXY] Request error:', err);
+    azureReq.on("error", (err) => {
+      if (verbose) {
+        console.error("[PROXY] Request error:", err);
+      }
       res.end();
       reject(err);
     });
@@ -965,55 +1273,71 @@ async function handleStreamingFromNonStreaming(
   openaiReq: any,
   model: string,
   verbose: boolean,
-  useResponsesAPI: boolean = false
+  useResponsesAPI: boolean = false,
 ): Promise<void> {
   res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
   });
 
   const msgId = `msg_${Date.now()}`;
-  res.write(sseEvent('message_start', {
-    type: 'message_start',
-    message: {
-      id: msgId,
-      type: 'message',
-      role: 'assistant',
-      content: [],
-      model,
-      stop_reason: null,
-      stop_sequence: null,
-      usage: { input_tokens: 0, output_tokens: 0 },
-    },
-  }));
+  res.write(
+    sseEvent("message_start", {
+      type: "message_start",
+      message: {
+        id: msgId,
+        type: "message",
+        role: "assistant",
+        content: [],
+        model,
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    }),
+  );
 
   const writeError = (message: string) => {
-    res.write(sseEvent('content_block_start', {
-      type: 'content_block_start',
-      index: 0,
-      content_block: { type: 'text', text: '' },
-    }));
-    res.write(sseEvent('content_block_delta', {
-      type: 'content_block_delta',
-      index: 0,
-      delta: { type: 'text_delta', text: message },
-    }));
-    res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }));
-    res.write(sseEvent('message_delta', {
-      type: 'message_delta',
-      delta: { stop_reason: 'end_turn', stop_sequence: null },
-      usage: { output_tokens: 0 },
-    }));
-    res.write(sseEvent('message_stop', { type: 'message_stop' }));
+    res.write(
+      sseEvent("content_block_start", {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      }),
+    );
+    res.write(
+      sseEvent("content_block_delta", {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: message },
+      }),
+    );
+    res.write(
+      sseEvent("content_block_stop", { type: "content_block_stop", index: 0 }),
+    );
+    res.write(
+      sseEvent("message_delta", {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 0 },
+      }),
+    );
+    res.write(sseEvent("message_stop", { type: "message_stop" }));
     res.end();
   };
 
   try {
-    const { statusCode, body } = await requestWithFallback(optionsList, openaiReq, verbose);
+    const { statusCode, body } = await requestWithFallback(
+      optionsList,
+      openaiReq,
+      verbose,
+    );
     if (statusCode !== 200) {
-      console.error(`[PROXY] Error response: ${statusCode}`);
-      console.error(`[PROXY] Error detail: ${body}`);
+      if (verbose) {
+        console.error(`[PROXY] Error response: ${statusCode}`);
+        console.error(`[PROXY] Error detail: ${body}`);
+      }
       writeError(`Error from Azure: ${body}`);
       return;
     }
@@ -1023,60 +1347,92 @@ async function handleStreamingFromNonStreaming(
     const responseContent = response.content || [];
 
     if (responseContent.length === 0) {
-      res.write(sseEvent('content_block_start', {
-        type: 'content_block_start',
-        index: 0,
-        content_block: { type: 'text', text: '' },
-      }));
-      res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }));
+      res.write(
+        sseEvent("content_block_start", {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        }),
+      );
+      res.write(
+        sseEvent("content_block_stop", {
+          type: "content_block_stop",
+          index: 0,
+        }),
+      );
     } else {
       let index = 0;
       for (const block of responseContent) {
-        if (block.type === 'text') {
-          res.write(sseEvent('content_block_start', {
-            type: 'content_block_start',
-            index,
-            content_block: { type: 'text', text: '' },
-          }));
-          res.write(sseEvent('content_block_delta', {
-            type: 'content_block_delta',
-            index,
-            delta: { type: 'text_delta', text: block.text || '' },
-          }));
-          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index }));
+        if (block.type === "text") {
+          res.write(
+            sseEvent("content_block_start", {
+              type: "content_block_start",
+              index,
+              content_block: { type: "text", text: "" },
+            }),
+          );
+          res.write(
+            sseEvent("content_block_delta", {
+              type: "content_block_delta",
+              index,
+              delta: { type: "text_delta", text: block.text || "" },
+            }),
+          );
+          res.write(
+            sseEvent("content_block_stop", {
+              type: "content_block_stop",
+              index,
+            }),
+          );
           index += 1;
-        } else if (block.type === 'tool_use') {
-          res.write(sseEvent('content_block_start', {
-            type: 'content_block_start',
-            index,
-            content_block: {
-              type: 'tool_use',
-              id: block.id || '',
-              name: block.name || '',
-              input: {},
-            },
-          }));
+        } else if (block.type === "tool_use") {
+          res.write(
+            sseEvent("content_block_start", {
+              type: "content_block_start",
+              index,
+              content_block: {
+                type: "tool_use",
+                id: block.id || "",
+                name: block.name || "",
+                input: {},
+              },
+            }),
+          );
           const payload = JSON.stringify(block.input || {});
-          res.write(sseEvent('content_block_delta', {
-            type: 'content_block_delta',
-            index,
-            delta: { type: 'input_json_delta', partial_json: payload },
-          }));
-          res.write(sseEvent('content_block_stop', { type: 'content_block_stop', index }));
+          res.write(
+            sseEvent("content_block_delta", {
+              type: "content_block_delta",
+              index,
+              delta: { type: "input_json_delta", partial_json: payload },
+            }),
+          );
+          res.write(
+            sseEvent("content_block_stop", {
+              type: "content_block_stop",
+              index,
+            }),
+          );
           index += 1;
         }
       }
     }
 
-    res.write(sseEvent('message_delta', {
-      type: 'message_delta',
-      delta: { stop_reason: response.stop_reason || 'end_turn', stop_sequence: null },
-      usage: { output_tokens: response.usage?.output_tokens || 0 },
-    }));
-    res.write(sseEvent('message_stop', { type: 'message_stop' }));
+    res.write(
+      sseEvent("message_delta", {
+        type: "message_delta",
+        delta: {
+          stop_reason: response.stop_reason || "end_turn",
+          stop_sequence: null,
+        },
+        usage: { output_tokens: response.usage?.output_tokens || 0 },
+      }),
+    );
+    res.write(sseEvent("message_stop", { type: "message_stop" }));
     res.end();
   } catch (error: any) {
-    console.error('[PROXY] Request error:', error.message);
+    if (verbose) {
+      console.error("[PROXY] Request error:", error.message);
+    }
     writeError(`Error from Azure: ${error.message}`);
   }
 }
@@ -1087,16 +1443,22 @@ async function handleNonStreaming(
   openaiReq: any,
   model: string,
   verbose: boolean,
-  useResponsesAPI: boolean = false
+  useResponsesAPI: boolean = false,
 ): Promise<void> {
   const optionsArray = Array.isArray(optionsList) ? optionsList : [optionsList];
 
   try {
-    const { statusCode, body } = await requestWithFallback(optionsArray, openaiReq, verbose);
+    const { statusCode, body } = await requestWithFallback(
+      optionsArray,
+      openaiReq,
+      verbose,
+    );
     if (statusCode !== 200) {
-      console.error(`[PROXY] Error response: ${statusCode}`);
-      console.error(`[PROXY] Error detail: ${body}`);
-      res.writeHead(statusCode || 500, { 'Content-Type': 'application/json' });
+      if (verbose) {
+        console.error(`[PROXY] Error response: ${statusCode}`);
+        console.error(`[PROXY] Error detail: ${body}`);
+      }
+      res.writeHead(statusCode || 500, { "Content-Type": "application/json" });
       res.end(body);
       return;
     }
@@ -1107,12 +1469,14 @@ async function handleNonStreaming(
       console.log(`[PROXY] Response preview: ${body.substring(0, 200)}...`);
     }
     const response = convertResponse(data, model, useResponsesAPI);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(response));
   } catch (error: any) {
-    console.error('[PROXY] Request error:', error.message);
+    if (verbose) {
+      console.error("[PROXY] Request error:", error.message);
+    }
     if (!res.headersSent) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.writeHead(500, { "Content-Type": "application/json" });
     }
     if (!res.writableEnded) {
       res.end(JSON.stringify({ error: { message: error.message } }));
@@ -1123,7 +1487,7 @@ async function handleNonStreaming(
 export function startProxy(config: ProxyConfig): Promise<void> {
   return new Promise((resolve) => {
     const server = createProxy(config);
-    server.listen(config.port, '127.0.0.1', () => {
+    server.listen(config.port, "127.0.0.1", () => {
       resolve();
     });
   });
